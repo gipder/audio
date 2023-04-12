@@ -84,7 +84,12 @@ std::tuple<torch::Tensor, c10::optional<torch::Tensor>> compute(
   options.maxTgtLen_ = logits.size(2);
   options.numTargets_ = logits.size(3);
   options.blank_ = blank;
-  options.clamp_ = clamp;  
+  options.clamp_ = clamp;
+  options.fastEmit_ = fast_emit;
+  options.fastEmitWeight_ = fast_emit_weight;
+  options.lossRegularization_ = loss_regularization;
+  options.lossRegularizationWeight_ = loss_regularization_weight;
+  options.lossRegularizationSigma_ = loss_regularization_sigma;  
 
   CHECK_EQ(logits.device().type(), torch::DeviceType::CPU);
   options.device_ = CPU;

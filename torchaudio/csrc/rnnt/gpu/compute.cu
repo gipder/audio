@@ -13,7 +13,12 @@ std::tuple<torch::Tensor, c10::optional<torch::Tensor>> compute(
     const torch::Tensor& logit_lengths,
     const torch::Tensor& target_lengths,
     int64_t blank,
-    double clamp) {
+    double clamp,
+    bool fast_emit,
+    double fast_emit_weight,
+    bool loss_regularization,
+    double loss_regularization_weight,
+    double loss_regularization_sigma) {
   TORCH_CHECK(
       logits.device().type() == targets.device().type(),
       "logits and targets must be on the same device");
@@ -81,6 +86,11 @@ std::tuple<torch::Tensor, c10::optional<torch::Tensor>> compute(
   options.numTargets_ = logits.size(3);
   options.blank_ = blank;
   options.clamp_ = clamp;
+  options.fastEmit_ = fast_emit;
+  options.fastEmitWeight_ = fast_emit_weight;
+  options.lossRegularization_ = loss_regularization;
+  options.lossRegularizationWeight_ = loss_regularization_weight;
+  options.lossRegularizationSigma_ = loss_regularization_sigma;
 
   CHECK_EQ(logits.device().type(), torch::DeviceType::CUDA);
   options.stream_ = at::cuda::getCurrentCUDAStream();
