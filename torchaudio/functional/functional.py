@@ -1736,6 +1736,11 @@ def rnnt_loss(
     blank: int = -1,
     clamp: float = -1,
     reduction: str = "mean",
+    fast_emit: bool = False,
+    fast_emit_weight: float = 0.0,
+    loss_regularization: bool = False,
+    loss_regularization_weight: float = 0.0,
+    loss_regularization_sigma: float = 1.0,
 ):
     """Compute the RNN Transducer loss from *Sequence Transduction with Recurrent Neural Networks*
     [:footcite:`graves2012sequence`].
@@ -1758,6 +1763,11 @@ def rnnt_loss(
         clamp (float, optional): clamp for gradients (Default: ``-1``)
         reduction (string, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. (Default: ``'mean'``)
+        fast_emit (bool, optional): True or False for FastEmit
+        fast_emit_weight (float, optional): the lambda value of FastEmit
+        loss_regularization (bool, optional): True or False for loss regularization
+        loss_regularization_weight (float, optional): weight value of loss regularization
+        loss_regularization_sigma (float, optional): value related to the width of dense area
     Returns:
         Tensor: Loss with the reduction option applied. If ``reduction`` is  ``'none'``, then size `(batch)`,
         otherwise scalar.
@@ -1775,6 +1785,11 @@ def rnnt_loss(
         target_lengths=target_lengths,
         blank=blank,
         clamp=clamp,
+        fast_emit=fast_emit,
+        fast_emit_weight=fast_emit_weight,
+        loss_regularization=loss_regularization,
+        loss_regularization_weight=loss_regularization_weight,
+        loss_regularization_sigma=loss_regularization_sigma,
     )
 
     if reduction == "mean":
