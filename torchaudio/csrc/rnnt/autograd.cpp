@@ -13,10 +13,17 @@ class RNNTLossFunction : public torch::autograd::Function<RNNTLossFunction> {
       const torch::Tensor& logit_lengths,
       const torch::Tensor& target_lengths,
       int64_t blank,
-      double clamp) {
+      double clamp,
+      bool fast_emit,
+      double fast_emit_weight,
+      bool loss_regularization,
+      double loss_regularization_weight,
+      double loss_regularization_sigma) {
     torch::Tensor undef;
     auto result =
-        rnnt_loss(logits, targets, logit_lengths, target_lengths, blank, clamp);
+        rnnt_loss(logits, targets, logit_lengths, target_lengths, blank, clamp,
+                  fast_emit, fast_emit_weight,
+                  loss_regularization, loss_regularization_weight, loss_regularization_sigma);
     auto costs = std::get<0>(result);
     auto grads = std::get<1>(result).value_or(undef);
     ctx->save_for_backward({grads});
@@ -41,10 +48,17 @@ std::tuple<torch::Tensor, c10::optional<torch::Tensor>> rnnt_loss_autograd(
     const torch::Tensor& logit_lengths,
     const torch::Tensor& target_lengths,
     int64_t blank,
-    double clamp) {
+    double clamp,
+    bool fast_emit,
+    double fast_emit_weight,
+    bool loss_regularization,
+    double loss_regularization_weight,
+    double loss_regularization_sigma) {
   at::AutoDispatchBelowADInplaceOrView guard;
   auto results = RNNTLossFunction::apply(
-      logits, targets, logit_lengths, target_lengths, blank, clamp);
+      logits, targets, logit_lengths, target_lengths, blank, clamp,
+      fast_emit, fast_emit_weight,
+      loss_regularization, loss_regularization_weight, loss_regularization_sigma);
   return std::make_tuple(results[0], results[1]);
 }
 

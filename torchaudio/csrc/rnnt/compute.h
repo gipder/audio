@@ -9,8 +9,8 @@ std::tuple<torch::Tensor, c10::optional<torch::Tensor>> rnnt_loss(
     const torch::Tensor& target_lengths,
     int64_t blank,
     double clamp,
-    const bool fast_emit,
-    const double fast_emit_weight,
-    const bool loss_regularization,
-    const double loss_regularization_weight,
-    const double loss_regularization_sigma);
+    bool fast_emit,
+    double fast_emit_weight,
+    bool loss_regularization,
+    double loss_regularization_weight,
+    double loss_regularization_sigma);
