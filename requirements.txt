@@ -1,4 +1,5 @@
-torch>=1.4.0
+#torch>=1.4.0
+torch==1.12.1
 
 # Required for Windows because it's the only available backend
 SoundFile; sys_platform == 'win32'
