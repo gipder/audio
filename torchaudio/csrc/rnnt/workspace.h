@@ -16,6 +16,7 @@ namespace rnnt {
 //     2. log probibility pairs for blank and target, size = B * max_T * max_U
 //     3. alphas, size = B * max_T * max_U
 //     4. betas, size = B * max_T * max_U
+//     5. loss regularization, size = B * max_T * max U 
 template <typename DTYPE>
 class DtypeWorkspace {
  public:
@@ -72,6 +73,10 @@ class DtypeWorkspace {
   }
 
   static int ComputeSizeForBetas(const Options& options) { // B * T * U
+    return options.BTU();
+  }
+
+  static int ComputeSizeForLossRegularization(const Options& options) { // B * T * U
     return options.BTU();
   }
 

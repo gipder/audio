@@ -1,5 +1,6 @@
 #include <torch/script.h>
 #include <torchaudio/csrc/rnnt/compute.h>
+#include <iostream>
 
 namespace torchaudio {
 namespace rnnt {
@@ -38,7 +39,7 @@ class RNNTLossFunction : public torch::autograd::Function<RNNTLossFunction> {
     auto grad_out = grad_outputs[0].view({-1, 1, 1, 1});
     auto result = grad * grad_out;
     torch::Tensor undef;
-    return {result, undef, undef, undef, undef, undef, undef, undef};
+    return {result, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef};
   }
 };
 

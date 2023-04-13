@@ -79,6 +79,7 @@ typedef struct Options {
   friend std::ostream& operator<<(std::ostream& os, const Options& options) {
     os << "Options("
        << "batchSize_=" << options.batchSize_ << ", "
+       << "nHypos_=" << options.nHypos_ << ", "
        << "maxSrcLen_=" << options.maxSrcLen_ << ", "
        << "maxTgtLen_=" << options.maxTgtLen_ << ", "
        << "numTargets_=" << options.numTargets_ << ", "

@@ -1797,6 +1797,8 @@ def rnnt_loss(
     elif reduction == "sum":
         return costs.sum()
 
+    print(costs)
+
     return costs
 
 
