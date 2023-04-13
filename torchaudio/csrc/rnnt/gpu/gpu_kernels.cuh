@@ -12,6 +12,41 @@ namespace torchaudio {
 namespace rnnt {
 
 template <typename DTYPE, typename CAST_DTYPE>
+__global__ void ComputeGaussianMap(
+    int maxSrcLen,
+    int maxTgtLen,
+    const int* srcLengths,
+    const int* tgtLengths,
+    int H,
+    DTYPE slope,
+    DTYPE sigma,
+    DTYPE denom, // 1/sqrt( 2*pi*sigma^2 )
+    CAST_DTYPE* outputs) {
+  const int& maxT = maxSrcLen;
+  const int& maxU = maxTgtLen;
+  
+  const int bTgt = blockIdx.z; // 0 <= b < B
+  const int bSrc = bTgt / H;
+  const int T = srcLengths[bSrc];
+  const int U = tgtLengths[bTgt] + 1;
+
+  const int t = blockIdx.x * blockDim.x + threadIdx.x;
+  const int u = blockIdx.y;
+
+  if (t >= T || u >= U) { // out of boundary.
+    return;
+  }
+
+  Indexer3D indexer(maxT, maxU);
+  
+  int idx = indexer(bTgt, t, u);
+  
+  //for blank
+  //TODO: check if it is thread safe
+  outputs[idx] = std::exp( -(t - slope * u) * (t - slope * u) / (2 * sigma * sigma)) * denom;
+}
+
+template <typename DTYPE, typename CAST_DTYPE>
 __global__ void ComputeLogProbs(
     int maxSrcLen,
     int maxTgtLen,

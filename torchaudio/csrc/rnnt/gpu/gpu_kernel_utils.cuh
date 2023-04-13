@@ -92,8 +92,6 @@ __global__ void ReduceLogSumExpGivenMax2D(
   }
 }
 
-//template <int NUM_THREADS, typename DTYPE, typ
-
 } // namespace rnnt
 } // namespace torchaudio
 

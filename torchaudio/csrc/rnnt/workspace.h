@@ -58,6 +58,9 @@ class DtypeWorkspace {
   DTYPE* GetPointerToBetas() const {
     return GetPointerToAlphas() + ComputeSizeForAlphas(options_);
   }
+  DTYPE* GetPointerToLossRegularization() const {
+    return GetPointerToLossRegularization() + ComputeSizeForLossRegularization(options_);
+  }
 
  private:
   static int ComputeSizeForDenominators(const Options& options) { // B * T * U
@@ -210,6 +213,9 @@ class Workspace {
   }
   DTYPE* GetPointerToBetas() const {
     return dtype_workspace_.GetPointerToBetas();
+  }
+  DTYPE* GetPointerToLossRegularization() const {
+    return dtype_workspace_.GetPointerToLossRegularization();
   }
   int* GetPointerToAlphaCounters() const {
     return int_workspace_.GetPointerToAlphaCounters();

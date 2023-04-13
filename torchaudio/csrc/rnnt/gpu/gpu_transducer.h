@@ -5,6 +5,7 @@
 #include <torchaudio/csrc/rnnt/workspace.h>
 #include <torchaudio/csrc/rnnt/gpu/gpu_kernel_utils.cuh>
 #include <torchaudio/csrc/rnnt/gpu/gpu_kernels.cuh>
+#include <cmath>
 
 namespace torchaudio {
 namespace rnnt {
@@ -72,6 +73,53 @@ status_t LogSumExp2D(
   return SUCCESS;
 }
 
+template <typename DTYPE, typename CAST_DTYPE>
+status_t ComputeMap(
+    const Workspace<CAST_DTYPE>& workspace,
+    const int* srcLengths,
+    const int* tgtLengths,
+    CAST_DTYPE* outputs) {
+  { 
+    const Options& options = workspace.GetOptions();
+
+    const cudaStream_t& stream = options.stream_;
+    const int& B = options.batchSize_;
+    const int& H = options.nHypos_;
+    const int& max_T = options.maxSrcLen_;
+    const int& max_U = options.maxTgtLen_;
+    const int& D = options.numTargets_;
+    const int& blank = options.blank_;
+   
+    int num_segments =
+          (max_T + MAX_THREADS_PER_BLOCK - 1) / MAX_THREADS_PER_BLOCK;
+    dim3 block_dims(num_segments, max_U, B * H);
+    dim3 thread_dims(MAX_THREADS_PER_BLOCK);
+
+    DTYPE slope = max_T / max_U;
+    DTYPE sigma = options.lossRegularizationSigma_;
+    DTYPE denom = 1.0 / sqrt( 2 * M_PI * sigma * sigma );
+    std::cout << "GARBAGE IS WORKING" << std::endl;
+    ComputeGaussianMap<DTYPE, CAST_DTYPE><<<block_dims, thread_dims, 0, stream>>>(
+            /*maxSrcLen*/max_T,
+            /*maxTgtLen*/max_U,
+            /*srcLengths*/srcLengths,
+            /*tgtLengths*/tgtLengths,
+            /*nHypothesis*/H,
+            /*slope*/slope,
+            /*sigma*/sigma,
+            /*denom*/denom,
+            /*outputs*/outputs);
+
+    // BUGBUG: These error codes are only accurate when launching with
+    // blocking. Otherwise they usually reflect earlier errors.
+    if (cudaGetLastError() != cudaSuccess) {
+      return COMPUTE_DENOMINATOR_REDUCE_MAX_FAILED;
+    }
+  }
+  
+  return SUCCESS;
+}
+
 // Inputs:
 //   workspace: workspace.
 //   logits: pointer to (B, max_T, max_U, D) logits.
@@ -100,8 +148,13 @@ status_t Compute(
   const int& max_U = options.maxTgtLen_;
   const int& D = options.numTargets_;
   const int& blank = options.blank_;
-  const CAST_DTYPE clamp = options.clamp_;
-
+  const DTYPE clamp = options.clamp_;
+  const bool fast_emit = options.fastEmit_;
+  const DTYPE fast_emit_weight = options.fastEmitWeight_;
+  const bool loss_regularization = options.lossRegularization_;
+  const DTYPE loss_regularization_weight = options.lossRegularizationWeight_;
+  const DTYPE loss_regularization_sigma = options.lossRegularizationSigma_;
+  
   { // compute denominators.
     status_t status = LogSumExp2D<DTYPE, CAST_DTYPE>(
         /*stream=*/stream,
@@ -114,6 +167,24 @@ status_t Compute(
       return status;
     }
   }
+  
+  {
+    if (loss_regularization){
+      int num_segments =
+          (max_T + MAX_THREADS_PER_BLOCK - 1) / MAX_THREADS_PER_BLOCK;
+      dim3 block_dims(num_segments, max_U, B * H);
+      dim3 thread_dims(MAX_THREADS_PER_BLOCK);
+
+      ComputeMap<DTYPE, CAST_DTYPE>(
+        workspace,
+        srcLengths,
+        tgtLengths,
+        workspace.GetPointerToLossRegularization()
+      );
+
+    }
+
+  }
 
   { // compute log probability pairs (blank and target).
     int num_segments =
@@ -124,7 +195,7 @@ status_t Compute(
     ComputeLogProbs<DTYPE, CAST_DTYPE><<<block_dims, thread_dims, 0, stream>>>(
         /*max_src_len=*/max_T,
         /*max_tgt_len=*/max_U,
-        /*num_targets=*/D,
+        /*num_targets=*/D,  
         /*blank=*/blank,
         /*logits=*/logits,
         /*targets=*/targets,
@@ -135,7 +206,7 @@ status_t Compute(
         H);
 
     if (cudaGetLastError() != cudaSuccess) {
-      return COMPUTE_LOG_PROBS_FAILED;
+      return FAILURE;
     }
   }
 

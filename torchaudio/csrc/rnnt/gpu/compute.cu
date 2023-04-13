@@ -148,8 +148,6 @@ std::tuple<torch::Tensor, c10::optional<torch::Tensor>> compute(
       break;
     }
   };
-  
-  std::cout << options << std::endl;
 
   return std::make_tuple(costs, gradients);
 }
