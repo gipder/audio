@@ -59,7 +59,7 @@ class DtypeWorkspace {
     return GetPointerToAlphas() + ComputeSizeForAlphas(options_);
   }
   DTYPE* GetPointerToLossRegularization() const {
-    return GetPointerToLossRegularization() + ComputeSizeForLossRegularization(options_);
+    return GetPointerToBetas() + ComputeSizeForBetas(options_);
   }
 
  private:

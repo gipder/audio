@@ -16,6 +16,7 @@ std::tuple<torch::Tensor, c10::optional<torch::Tensor>> rnnt_loss(
   static auto op = torch::Dispatcher::singleton()
                        .findSchemaOrThrow("torchaudio::rnnt_loss", "")
                        .typed<decltype(rnnt_loss)>();
+
   return op.call(logits, targets, logit_lengths, target_lengths, blank, clamp, 
                  fast_emit, fast_emit_weight, 
                  loss_regularization, loss_regularization_weight, loss_regularization_sigma);
