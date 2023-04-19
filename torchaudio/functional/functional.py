@@ -1790,14 +1790,11 @@ def rnnt_loss(
         loss_regularization=loss_regularization,
         loss_regularization_weight=loss_regularization_weight,
         loss_regularization_sigma=loss_regularization_sigma,
-    )
-
+    )    
     if reduction == "mean":
         return costs.mean()
     elif reduction == "sum":
         return costs.sum()
-
-    print(costs)
 
     return costs
 

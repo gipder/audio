@@ -11,6 +11,8 @@ namespace torchaudio {
 namespace rnnt {
 namespace gpu {
 
+static int incount = 0;
+
 #define gpuErrchk(ans) \
   { gpuAssert((ans), __FILE__, __LINE__); }
 
@@ -97,8 +99,7 @@ status_t ComputeMap(
 
     DTYPE slope = max_T / max_U;
     DTYPE sigma = options.lossRegularizationSigma_;
-    DTYPE denom = 1.0 / sqrt( 2 * M_PI * sigma * sigma );
-    std::cout << "GARBAGE IS WORKING" << std::endl;
+    DTYPE denom = 1.0 / sqrt( 2 * M_PI * sigma * sigma );    
     ComputeGaussianMap<DTYPE, CAST_DTYPE><<<block_dims, thread_dims, 0, stream>>>(
             /*maxSrcLen*/max_T,
             /*maxTgtLen*/max_U,
@@ -119,6 +120,8 @@ status_t ComputeMap(
   
   return SUCCESS;
 }
+
+// CPU version computMap
 
 // Inputs:
 //   workspace: workspace.
@@ -175,13 +178,41 @@ status_t Compute(
       dim3 block_dims(num_segments, max_U, B * H);
       dim3 thread_dims(MAX_THREADS_PER_BLOCK);
 
-      ComputeMap<DTYPE, CAST_DTYPE>(
-        workspace,
+      DTYPE slope = max_T / max_U;
+      DTYPE sigma = options.lossRegularizationSigma_;
+      DTYPE denom = 1.0 / sqrt( 2 * M_PI * sigma * sigma );    
+      //std::cout << "GARBAGE IS WORKING" << std::endl;
+      //ComputeMap<DTYPE, CAST_DTYPE><<<block_dims, thread_dims, 0, stream>>>(
+      ComputeGaussianMap<DTYPE, CAST_DTYPE><<<block_dims, thread_dims, 0, stream>>>(
+        max_T,
+        max_U,
         srcLengths,
         tgtLengths,
+        H,
+        slope,
+        sigma,
+        denom,
         workspace.GetPointerToLossRegularization()
       );
-
+//#define MY_DEBUG
+#ifdef MY_DEBUG      
+      int mSize = options.BTU();
+      DTYPE* garbage = new DTYPE[mSize];      
+      cudaMemcpy(garbage, workspace.GetPointerToLossRegularization(), mSize * sizeof(DTYPE), cudaMemcpyDeviceToHost);
+      int* tLen = new int[B];
+      int* uLen = new int[B];
+      cudaMemcpy(tLen, srcLengths, B * sizeof(int), cudaMemcpyDeviceToHost);
+      cudaMemcpy(uLen, tgtLengths, B * sizeof(int), cudaMemcpyDeviceToHost);
+      Indexer3D idxr(max_T, max_U);
+      
+      for(int b=0; b<B; b++){
+        std::cout << tLen[b] << ", " << uLen[b] << std::endl;  
+      }
+      
+      for(int b=0; b<B; b++){
+        std::cout << garbage[idxr(b, 0, 0)] << std::endl;        
+      }
+#endif      
     }
 
   }
@@ -239,7 +270,12 @@ status_t Compute(
             /*costs=*/costs,
             /*warp_size=*/WARP_SIZE,
             /*num_warps=*/num_warps,
-            H);
+            H,
+            fast_emit,
+            fast_emit_weight,
+            loss_regularization,
+            loss_regularization_weight,
+            workspace.GetPointerToLossRegularization());
     if (cudaGetLastError() != cudaSuccess) {
       return COMPUTE_ALPHAS_BETAS_COSTS_FAILED;
     }
@@ -248,7 +284,45 @@ status_t Compute(
   if (gradients != nullptr) { // compute gradients.
     // don't set gradients to zero to here as gradients might reuse memory from
     // logits
-
+#define MY_DEBUG2
+#ifdef MY_DEBUG2
+      int mSize = options.BTU();
+      DTYPE* garbage = new DTYPE[mSize];
+      cudaMemcpy(garbage, workspace.GetPointerToLossRegularization(), mSize * sizeof(DTYPE), cudaMemcpyDeviceToHost);
+      int* tLen = new int[B];
+      int* uLen = new int[B];
+      float* mCosts = new float[B];
+      cudaMemcpy(tLen, srcLengths, B * sizeof(int), cudaMemcpyDeviceToHost);
+      cudaMemcpy(uLen, tgtLengths, B * sizeof(int), cudaMemcpyDeviceToHost);
+      cudaMemcpy(mCosts, costs, B * sizeof(float), cudaMemcpyDeviceToHost);
+      Indexer3D idxr(max_T, max_U);
+      
+      int bSize = options.BTU();
+      DTYPE* betas = new DTYPE[bSize];
+      cudaMemcpy(betas, workspace.GetPointerToBetas(), bSize * sizeof(DTYPE), cudaMemcpyDeviceToHost);
+      
+      for(int b=0; b<B; b++){
+        int costIdx = b * max_T * max_U;
+        std::cout << tLen[b] << ", " << uLen[b] << ", "         
+                  << garbage[idxr(b, 0, 0)] << ", " 
+                  << mCosts[b] << ", " 
+                  << betas[idxr(b, 0, 0)]
+                  << " MY_DEBUG2" << std::endl;
+      }
+      /*
+            for(int b=0; b<B; b++){
+        for(int u=0; u<uLen[b]; u++){
+          for(int t=0; t<tLen[b]; t++){
+            std::cout << garbage[idxr(b, t, u)] << ", ";
+          }
+          std::cout << std::endl;
+        }
+        std::cout << std::endl;
+        std::cout << std::endl;
+      }      
+      */
+     
+#endif      
     int num_blocks =
         (max_T + MAX_THREADS_PER_BLOCK - 1) / MAX_THREADS_PER_BLOCK;
     dim3 block_dims(num_blocks, max_U, B * H);
@@ -268,7 +342,46 @@ status_t Compute(
         /*alphas=*/workspace.GetPointerToAlphas(),
         /*betas=*/workspace.GetPointerToBetas(),
         /*gradients=*/gradients,
-        H);
+        H,
+        fast_emit,
+        fast_emit_weight,
+        loss_regularization,
+        loss_regularization_weight,
+        workspace.GetPointerToLossRegularization());    
+//#define MY_DEBUG3
+#ifdef MY_DEBUG3
+      int mSize = options.BTU();
+      DTYPE* garbage = new DTYPE[mSize];
+      cudaMemcpy(garbage, workspace.GetPointerToLossRegularization(), mSize * sizeof(DTYPE), cudaMemcpyDeviceToHost);
+      int* tLen = new int[B];
+      int* uLen = new int[B];
+      float* mCosts = new float[B];
+      cudaMemcpy(tLen, srcLengths, B * sizeof(int), cudaMemcpyDeviceToHost);
+      cudaMemcpy(uLen, tgtLengths, B * sizeof(int), cudaMemcpyDeviceToHost);
+      cudaMemcpy(mCosts, costs, B * sizeof(float), cudaMemcpyDeviceToHost);
+      Indexer3D idxr(max_T, max_U);
+      
+      int bSize = options.BTU();
+      DTYPE* betas = new DTYPE[bSize];
+      cudaMemcpy(betas, workspace.GetPointerToBetas(), bSize * sizeof(DTYPE), cudaMemcpyDeviceToHost);
+      
+      for(int b=0; b<B; b++){
+        int costIdx = b * max_T * max_U;
+        std::cout << tLen[b] << ", " << uLen[b] << ", "         
+                  << garbage[idxr(b, 0, 0)] << ", " 
+                  << mCosts[b] << ", " 
+                  << betas[idxr(b, 0, 0)]
+                  << " MY_DEBUG3" << std::endl;
+      }     
+#endif
+    if(incount == 2){
+      exit(3);
+    }
+    else{
+      std::cout << std::endl;
+      incount++;
+    }
+    
     if (cudaGetLastError() != cudaSuccess) {
       return COMPUTE_GRADIENTS_FAILED;
     }

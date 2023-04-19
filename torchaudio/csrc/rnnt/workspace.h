@@ -31,7 +31,7 @@ class DtypeWorkspace {
     CHECK_NE(options.device_, UNDEFINED);
     return ComputeSizeForDenominators(options) +
         ComputeSizeForLogProbs(options) + ComputeSizeForAlphas(options) +
-        ComputeSizeForBetas(options);
+        ComputeSizeForBetas(options) + ComputeSizeForLossRegularization(options);
   }
 
   void Free();

@@ -4,6 +4,7 @@
 
 #include <torchaudio/csrc/rnnt/gpu/kernel_utils.h>
 #include <torchaudio/csrc/rnnt/gpu/math.cuh>
+#include <iostream>
 
 namespace torchaudio {
 namespace rnnt {
@@ -26,7 +27,12 @@ HOST_AND_DEVICE void ComputeGradientsElement(
     const CAST_DTYPE* alphas,
     const CAST_DTYPE* betas,
     DTYPE* gradients,
-    int H = 1) {
+    int H = 1,
+    const bool fastEmit = false,
+    const DTYPE fastEmitWeight = 0.0,
+    const bool lossRegularization = false, 
+    const DTYPE lossRegWeight = 0.0,
+    const CAST_DTYPE* lossRegMap = nullptr) {
   const int& maxT = maxSrcLen;
   const int& maxU = maxTgtLen;
   const int& D = numTargets;
@@ -50,9 +56,19 @@ HOST_AND_DEVICE void ComputeGradientsElement(
     return;
   }
 
-  int costIdx = bTgt * maxT * maxU;
-  CAST_DTYPE cost = -(betas[costIdx]);
-
+  int costIdx = bTgt * maxT * maxU;  
+  CAST_DTYPE cc1 = -(betas[costIdx]);// = -(betas[costIdx]);
+  CAST_DTYPE cc2 = lossRegMap[costIdx];
+  //CAST_DTYPE cc2 = -(betas[costIdx]);// = -(betas[costIdx]);
+#if 0
+  if ( 1 ){
+    Indexer3D idxr3(maxT, maxU);
+    //cost = cost + lossRegWeight * lossRegMap[idxr3(bTgt, 0, 0)] * cost;    
+    //cost = cc1 + cc2;
+  }
+#endif
+  CAST_DTYPE cost = cc1 + cc2;
+  
   Indexer2D idxr2(maxU - 1);
 
   int idx_b_t_u, idx_b_t_up1, idx_b_tp1_u;
@@ -89,13 +105,22 @@ HOST_AND_DEVICE void ComputeGradientsElement(
     } else if (u < U - 1 && d == targets[idxr2(bTgt, u)]) {
       gradients[b_t_u_d] = std::exp(g + betas[idx_b_t_u]);
       if (idx_b_t_up1 != -1) {
+        
         gradients[b_t_u_d] =
             gradients[b_t_u_d] - std::exp(g + betas[idx_b_t_up1]);
       }
     } else {
       gradients[b_t_u_d] = std::exp(g + betas[idx_b_t_u]);
     }
-
+#if 1 
+    if (lossRegularization) {      
+      Indexer3D idxr3(maxT, maxU);
+      gradients[b_t_u_d] = gradients[b_t_u_d] + 
+          lossRegWeight * lossRegMap[idxr3(bTgt, t, u)] * gradients[b_t_u_d];
+    }
+#endif
+    
+      
     if (clamp > 0) {
       auto g = CAST_DTYPE(gradients[b_t_u_d]);
       gradients[b_t_u_d] = math::min(g, clamp);

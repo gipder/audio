@@ -43,7 +43,8 @@ __global__ void ComputeGaussianMap(
   
   //for blank
   //TODO: check if it is thread safe
-  outputs[idx] = std::exp( -(t - slope * u) * (t - slope * u) / (2 * sigma * sigma)) * denom;
+  //outputs[idx] = std::exp( -(t - slope * u) * (t - slope * u) / (2 * sigma * sigma)) * denom;
+  outputs[idx] = 10;
 }
 
 template <typename DTYPE, typename CAST_DTYPE>
@@ -202,7 +203,12 @@ __device__ void ComputeBetasCosts(
     int* betaCounters,
     volatile CAST_DTYPE* betas,
     DTYPE* costs,
-    int H = 1) {
+    int H = 1,
+    const bool fastEmit = false,
+    const DTYPE fastEmitWeight = 0.0,
+    const bool lossRegularization = false,
+    const DTYPE lossRegWeight = 0.0,
+    volatile CAST_DTYPE* lossRegMap = nullptr) {
   const int& maxT = maxSrcLen;
   const int& maxU = maxTgtLen;
 
@@ -283,6 +289,9 @@ __device__ void ComputeBetasCosts(
 
     if (t == 0 && u == 0) { // use -beta(0, 0) as cost.
       costs[bTgt] = DTYPE(-out);
+      if(lossRegularization){
+        costs[bTgt] = costs[bTgt] + lossRegWeight * lossRegMap[idxr(bTgt, 0, 0)] * costs[bTgt];
+      }
     }
   }
 
@@ -308,7 +317,12 @@ __global__ void ComputeAlphasBetasCosts(
     DTYPE* costs,
     int warpSize = 0,
     int numWarps = 0,
-    int H = 1) {
+    int H = 1,
+    const bool fastEmit = false,
+    const DTYPE fastEmitWeight = 0.0,
+    const bool lossRegularization = false,
+    const DTYPE lossRegWeight = 0.0,
+    CAST_DTYPE* lossRegMap = nullptr) {
   assert(threadIdx.y == 0 || threadIdx.y == 1);
 
   if (threadIdx.y == 0) {
@@ -335,7 +349,12 @@ __global__ void ComputeAlphasBetasCosts(
         /*betaCounters=*/betaCounters,
         /*beta=*/betas,
         /*costs=*/costs,
-        H);
+        H,
+        fastEmit,
+        fastEmitWeight,
+        lossRegularization,
+        lossRegWeight,
+        lossRegMap);
   }
 }
 
@@ -354,7 +373,12 @@ __global__ void ComputeGradients(
     const CAST_DTYPE* alphas,
     const CAST_DTYPE* betas,
     DTYPE* gradients,
-    int H = 1) {
+    int H = 1,
+    const bool fastEmit = false,
+    const DTYPE fastEmitWeight = 0.0,
+    const bool lossRegularization = false, 
+    const DTYPE lossRegWeight = 0.0,
+    CAST_DTYPE* lossRegMap = nullptr) {
   const int bTgt = blockIdx.z; // 0 <= b < B
   const int t = blockIdx.x * blockDim.x + threadIdx.x;
   const int u = blockIdx.y;
@@ -368,7 +392,7 @@ __global__ void ComputeGradients(
       numTargets,
       blank,
       clamp,
-      logits,
+      logits,   
       targets,
       srcLengths,
       tgtLengths,
@@ -376,7 +400,12 @@ __global__ void ComputeGradients(
       alphas,
       betas,
       gradients,
-      H);
+      H,
+      fastEmit,
+      fastEmitWeight,
+      lossRegularization,
+      lossRegWeight,
+      lossRegMap);
 }
 
 // This is a __global__ wrapper around ComputeAlphas
@@ -420,7 +449,12 @@ __global__ void ComputeBetasWrapper(
     int* betaCounters,
     volatile CAST_DTYPE* betas,
     DTYPE* costs,
-    int H = 1) {
+    int H = 1,
+    const bool fastEmit = false,
+    const DTYPE fastEmitWeight = 0.0,
+    const bool lossRegularization = false, 
+    const DTYPE lossRegWeight = 0.0,
+    CAST_DTYPE* lossRegMap = nullptr) {
   ComputeBetasCosts<DTYPE, CAST_DTYPE>(
       maxSrcLen,
       maxTgtLen,
@@ -432,7 +466,12 @@ __global__ void ComputeBetasWrapper(
       betaCounters,
       betas,
       costs,
-      H);
+      H,
+      fastEmit,
+      fastEmitWeight,
+      lossRegularization,
+      lossRegWeight,
+      lossRegMap);
 }
 
 // #undef LOG_PROBS_SKIP_IDX
