@@ -81,7 +81,7 @@ status_t ComputeMap(
     const int* srcLengths,
     const int* tgtLengths,
     CAST_DTYPE* outputs) {
-  { 
+  {
     const Options& options = workspace.GetOptions();
 
     const cudaStream_t& stream = options.stream_;
@@ -91,7 +91,7 @@ status_t ComputeMap(
     const int& max_U = options.maxTgtLen_;
     const int& D = options.numTargets_;
     const int& blank = options.blank_;
-   
+
     int num_segments =
           (max_T + MAX_THREADS_PER_BLOCK - 1) / MAX_THREADS_PER_BLOCK;
     dim3 block_dims(num_segments, max_U, B * H);
@@ -99,7 +99,8 @@ status_t ComputeMap(
 
     DTYPE slope = max_T / max_U;
     DTYPE sigma = options.lossRegularizationSigma_;
-    DTYPE denom = 1.0 / sqrt( 2 * M_PI * sigma * sigma );    
+    DTYPE weight = options.lossRegularizationWeight_;
+    DTYPE denom = 1.0 / sqrt( 2 * M_PI * sigma * sigma );
     ComputeGaussianMap<DTYPE, CAST_DTYPE><<<block_dims, thread_dims, 0, stream>>>(
             /*maxSrcLen*/max_T,
             /*maxTgtLen*/max_U,
@@ -108,6 +109,7 @@ status_t ComputeMap(
             /*nHypothesis*/H,
             /*slope*/slope,
             /*sigma*/sigma,
+            /*weight*/weight,
             /*denom*/denom,
             /*outputs*/outputs);
 
@@ -117,7 +119,7 @@ status_t ComputeMap(
       return COMPUTE_DENOMINATOR_REDUCE_MAX_FAILED;
     }
   }
-  
+
   return SUCCESS;
 }
 
@@ -157,7 +159,7 @@ status_t Compute(
   const bool loss_regularization = options.lossRegularization_;
   const DTYPE loss_regularization_weight = options.lossRegularizationWeight_;
   const DTYPE loss_regularization_sigma = options.lossRegularizationSigma_;
-  
+
   { // compute denominators.
     status_t status = LogSumExp2D<DTYPE, CAST_DTYPE>(
         /*stream=*/stream,
@@ -170,7 +172,7 @@ status_t Compute(
       return status;
     }
   }
-  
+
   {
     if (loss_regularization){
       int num_segments =
@@ -180,7 +182,8 @@ status_t Compute(
 
       DTYPE slope = max_T / max_U;
       DTYPE sigma = options.lossRegularizationSigma_;
-      DTYPE denom = 1.0 / sqrt( 2 * M_PI * sigma * sigma );    
+      DTYPE weight = options.lossRegularizationWeight_;
+      DTYPE denom = 1.0 / sqrt( 2 * M_PI * sigma * sigma );
       //std::cout << "GARBAGE IS WORKING" << std::endl;
       //ComputeMap<DTYPE, CAST_DTYPE><<<block_dims, thread_dims, 0, stream>>>(
       ComputeGaussianMap<DTYPE, CAST_DTYPE><<<block_dims, thread_dims, 0, stream>>>(
@@ -191,28 +194,29 @@ status_t Compute(
         H,
         slope,
         sigma,
+        weight,
         denom,
         workspace.GetPointerToLossRegularization()
       );
 //#define MY_DEBUG
-#ifdef MY_DEBUG      
+#ifdef MY_DEBUG
       int mSize = options.BTU();
-      DTYPE* garbage = new DTYPE[mSize];      
+      DTYPE* garbage = new DTYPE[mSize];
       cudaMemcpy(garbage, workspace.GetPointerToLossRegularization(), mSize * sizeof(DTYPE), cudaMemcpyDeviceToHost);
       int* tLen = new int[B];
       int* uLen = new int[B];
       cudaMemcpy(tLen, srcLengths, B * sizeof(int), cudaMemcpyDeviceToHost);
       cudaMemcpy(uLen, tgtLengths, B * sizeof(int), cudaMemcpyDeviceToHost);
       Indexer3D idxr(max_T, max_U);
-      
+
       for(int b=0; b<B; b++){
-        std::cout << tLen[b] << ", " << uLen[b] << std::endl;  
+        std::cout << tLen[b] << ", " << uLen[b] << std::endl;
       }
-      
+
       for(int b=0; b<B; b++){
-        std::cout << garbage[idxr(b, 0, 0)] << std::endl;        
+        std::cout << garbage[idxr(b, 0, 0)] << std::endl;
       }
-#endif      
+#endif
     }
 
   }
@@ -226,7 +230,7 @@ status_t Compute(
     ComputeLogProbs<DTYPE, CAST_DTYPE><<<block_dims, thread_dims, 0, stream>>>(
         /*max_src_len=*/max_T,
         /*max_tgt_len=*/max_U,
-        /*num_targets=*/D,  
+        /*num_targets=*/D,
         /*blank=*/blank,
         /*logits=*/logits,
         /*targets=*/targets,
@@ -289,6 +293,7 @@ status_t Compute(
       int mSize = options.BTU();
       DTYPE* garbage = new DTYPE[mSize];
       cudaMemcpy(garbage, workspace.GetPointerToLossRegularization(), mSize * sizeof(DTYPE), cudaMemcpyDeviceToHost);
+      DTYPE* mAlphas = new DTYPE[mSize];
       int* tLen = new int[B];
       int* uLen = new int[B];
       float* mCosts = new float[B];
@@ -296,21 +301,34 @@ status_t Compute(
       cudaMemcpy(uLen, tgtLengths, B * sizeof(int), cudaMemcpyDeviceToHost);
       cudaMemcpy(mCosts, costs, B * sizeof(float), cudaMemcpyDeviceToHost);
       Indexer3D idxr(max_T, max_U);
-      
+
       int bSize = options.BTU();
       DTYPE* betas = new DTYPE[bSize];
       cudaMemcpy(betas, workspace.GetPointerToBetas(), bSize * sizeof(DTYPE), cudaMemcpyDeviceToHost);
-      
+      cudaMemcpy(mAlphas, workspace.GetPointerToAlphas(), bSize * sizeof(DTYPE), cudaMemcpyDeviceToHost);
+
       for(int b=0; b<B; b++){
         int costIdx = b * max_T * max_U;
-        std::cout << tLen[b] << ", " << uLen[b] << ", "         
-                  << garbage[idxr(b, 0, 0)] << ", " 
-                  << mCosts[b] << ", " 
+        std::cout << tLen[b] << ", " << uLen[b] << ", "
+                  << garbage[idxr(b, 0, 0)] << ", "
+                  << mCosts[b] << ", "
                   << betas[idxr(b, 0, 0)]
                   << " MY_DEBUG2" << std::endl;
       }
-      /*
-            for(int b=0; b<B; b++){
+      float tmp = std::log(5.5);
+      int myt=0;
+      int myu=0;
+      std::cout << tmp << std::endl;
+      std::cout << "loss regularization weight: " << loss_regularization_weight << std::endl;
+      std::cout << "loss regularization sigma: " << loss_regularization_sigma << std::endl;
+      float mydenom = 1.0 / sqrt( 2 * M_PI * pow(loss_regularization_weight, 2 ));
+      float myslope = max_T / max_U;
+      float result = log(loss_regularization_weight * exp(-(pow(myt-myslope * myu, 2))/(2*pow(loss_regularization_sigma, 2)))*mydenom);
+      std::cout << "loss regularization map " <<myt << ", " << myu <<": " <<result <<std::endl;
+      std::cout << options << std::endl;
+
+      std::cout << "GARBAGE MAP" << std::endl;
+      for(int b=0; b<1; b++){
         for(int u=0; u<uLen[b]; u++){
           for(int t=0; t<tLen[b]; t++){
             std::cout << garbage[idxr(b, t, u)] << ", ";
@@ -319,10 +337,33 @@ status_t Compute(
         }
         std::cout << std::endl;
         std::cout << std::endl;
-      }      
-      */
-     
-#endif      
+      }
+
+      std::cout << "GARBAGE ALPHAS" << std::endl;
+      for(int b=0; b<1; b++){
+        for(int u=0; u<uLen[b]; u++){
+          for(int t=0; t<tLen[b]; t++){
+            std::cout << mAlphas[idxr(b, t, u)] << ", ";
+          }
+          std::cout << std::endl;
+        }
+        std::cout << std::endl;
+        std::cout << std::endl;
+      }
+
+      std::cout << "GARBAGE BETAS" << std::endl;
+      for(int b=0; b<1; b++){
+        for(int u=0; u<uLen[b]; u++){
+          for(int t=0; t<tLen[b]; t++){
+            std::cout << betas[idxr(b, t, u)] << ", ";
+          }
+          std::cout << std::endl;
+        }
+        std::cout << std::endl;
+        std::cout << std::endl;
+      }
+
+#endif
     int num_blocks =
         (max_T + MAX_THREADS_PER_BLOCK - 1) / MAX_THREADS_PER_BLOCK;
     dim3 block_dims(num_blocks, max_U, B * H);
@@ -347,7 +388,7 @@ status_t Compute(
         fast_emit_weight,
         loss_regularization,
         loss_regularization_weight,
-        workspace.GetPointerToLossRegularization());    
+        workspace.GetPointerToLossRegularization());
 //#define MY_DEBUG3
 #ifdef MY_DEBUG3
       int mSize = options.BTU();
@@ -360,19 +401,19 @@ status_t Compute(
       cudaMemcpy(uLen, tgtLengths, B * sizeof(int), cudaMemcpyDeviceToHost);
       cudaMemcpy(mCosts, costs, B * sizeof(float), cudaMemcpyDeviceToHost);
       Indexer3D idxr(max_T, max_U);
-      
+
       int bSize = options.BTU();
       DTYPE* betas = new DTYPE[bSize];
       cudaMemcpy(betas, workspace.GetPointerToBetas(), bSize * sizeof(DTYPE), cudaMemcpyDeviceToHost);
-      
+
       for(int b=0; b<B; b++){
         int costIdx = b * max_T * max_U;
-        std::cout << tLen[b] << ", " << uLen[b] << ", "         
-                  << garbage[idxr(b, 0, 0)] << ", " 
-                  << mCosts[b] << ", " 
+        std::cout << tLen[b] << ", " << uLen[b] << ", "
+                  << garbage[idxr(b, 0, 0)] << ", "
+                  << mCosts[b] << ", "
                   << betas[idxr(b, 0, 0)]
                   << " MY_DEBUG3" << std::endl;
-      }     
+      }
 #endif
     if(incount == 2){
       exit(3);
@@ -381,7 +422,7 @@ status_t Compute(
       std::cout << std::endl;
       incount++;
     }
-    
+
     if (cudaGetLastError() != cudaSuccess) {
       return COMPUTE_GRADIENTS_FAILED;
     }

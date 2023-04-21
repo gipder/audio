@@ -20,6 +20,7 @@ __global__ void ComputeGaussianMap(
     int H,
     DTYPE slope,
     DTYPE sigma,
+    DTYPE weight, 
     DTYPE denom, // 1/sqrt( 2*pi*sigma^2 )
     CAST_DTYPE* outputs) {
   const int& maxT = maxSrcLen;
@@ -43,8 +44,11 @@ __global__ void ComputeGaussianMap(
   
   //for blank
   //TODO: check if it is thread safe
-  //outputs[idx] = std::exp( -(t - slope * u) * (t - slope * u) / (2 * sigma * sigma)) * denom;
-  outputs[idx] = 10;
+  outputs[idx] = std::log(weight * std::exp( -(t - slope * u) * (t - slope * u) / (2 * sigma * sigma)) * denom);
+  if( outputs[idx] == -INFINITY ){
+      outputs[idx] = std::log(10e-64);
+  }
+  //outputs[idx] = 10;
 }
 
 template <typename DTYPE, typename CAST_DTYPE>
@@ -228,9 +232,14 @@ __device__ void ComputeBetasCosts(
 
   Indexer3D idxr(maxT, maxU);
 
-  if (t == T - 2 && u == U - 2) {
+  if (t == T - 2 && u == U - 2 && lossRegularization == false) {
     betas[idxr(bTgt, T - 1, U - 1)] =
         logProbs[(idxr(bTgt, T - 1, U - 1) << 1) + LOG_PROBS_SKIP_IDX];
+  }
+  else if (t == T - 2 && u == U - 2 && lossRegularization == true){
+    betas[idxr(bTgt, T - 1, U - 1)] =
+        logProbs[(idxr(bTgt, T - 1, U - 1) << 1) + LOG_PROBS_SKIP_IDX] 
+        + lossRegMap[idxr(bTgt, T - 1, U - 1)];
   }
 
   if (blockIdx.x > 0) { // wait for previous warp (in t-axis) is ready.
@@ -243,12 +252,17 @@ __device__ void ComputeBetasCosts(
     }
   }
 
-  if (t == T - 2 && u >= 0) {
+  if (t == T - 2 && u >= 0 && lossRegularization == false) {
     betas[idxr(bTgt, T - 1, u)] = betas[idxr(bTgt, T - 1, u + 1)] +
         logProbs[(idxr(bTgt, T - 1, u) << 1) + LOG_PROBS_EMIT_IDX];
   }
+  else if(t == T - 2 && u >= 0 && lossRegularization == true) {
+    betas[idxr(bTgt, T - 1, u)] = betas[idxr(bTgt, T - 1, u + 1)] +
+        logProbs[(idxr(bTgt, T - 1, u) << 1) + LOG_PROBS_EMIT_IDX]
+        + lossRegMap[idxr(bTgt, T - 1, u)];
+  }
 
-  if (blockIdx.y == 0 && t >= 0) {
+  if (blockIdx.y == 0 && t >= 0 && lossRegularization == false) {
     CAST_DTYPE skip_prob =
         logProbs[(idxr(bTgt, t, U - 1) << 1) + LOG_PROBS_SKIP_IDX];
     CAST_DTYPE val;
@@ -264,8 +278,25 @@ __device__ void ComputeBetasCosts(
     betas[idxr(bTgt, t, U - 1)] =
         betas[idxr(bTgt, T - 1 - blockIdx.x * blockDim.x, U - 1)] + skip_prob;
   }
+  else if (blockIdx.y == 0 && t >= 0 && lossRegularization == true) {
+    CAST_DTYPE skip_prob =
+        logProbs[(idxr(bTgt, t, U - 1) << 1) + LOG_PROBS_SKIP_IDX];
+    CAST_DTYPE val;
 
-  if (t >= 0 && u >= 0) {
+#pragma unroll
+    for (int i = 1; i < warpSize; i <<= 1) {
+      val = __shfl_up_sync(0xffffffff, skip_prob, i);
+      if (i <= threadIdx.x) {
+        skip_prob = skip_prob + val;
+      }
+    }
+
+    betas[idxr(bTgt, t, U - 1)] =
+        betas[idxr(bTgt, T - 1 - blockIdx.x * blockDim.x, U - 1)] + skip_prob 
+        + lossRegMap[idxr(bTgt, t, U - 1)];
+  }
+
+  if (t >= 0 && u >= 0 && lossRegularization == false) {
     CAST_DTYPE skip_prob =
         logProbs[(idxr(bTgt, t, u) << 1) + LOG_PROBS_SKIP_IDX];
     CAST_DTYPE emit_prob =
@@ -289,9 +320,35 @@ __device__ void ComputeBetasCosts(
 
     if (t == 0 && u == 0) { // use -beta(0, 0) as cost.
       costs[bTgt] = DTYPE(-out);
-      if(lossRegularization){
-        costs[bTgt] = costs[bTgt] + lossRegWeight * lossRegMap[idxr(bTgt, 0, 0)] * costs[bTgt];
+    }
+  }
+  else if (t >= 0 && u >= 0 && lossRegularization == true) {
+    CAST_DTYPE skip_prob =
+        logProbs[(idxr(bTgt, t, u) << 1) + LOG_PROBS_SKIP_IDX];
+    CAST_DTYPE emit_prob =
+        logProbs[(idxr(bTgt, t, u) << 1) + LOG_PROBS_EMIT_IDX];
+
+    CAST_DTYPE skip = betas[idxr(bTgt, t + threadIdx.x + 1, u)] + skip_prob;
+    CAST_DTYPE emit = betas[idxr(bTgt, t, u + 1)] + emit_prob;
+
+    CAST_DTYPE val = math::lse(skip, emit);
+    CAST_DTYPE out = val;
+
+    for (int i = 1; i < warpSize; ++i) {
+      val = __shfl_up_sync(0xffffffff, val, 1);
+      if (i == threadIdx.x) {
+        val = math::lse(val + skip_prob, emit);
+        out = val;
       }
+    }
+
+    betas[idxr(bTgt, t, u)] = out + lossRegMap[idxr(bTgt, t, u)];
+
+    if (t == 0 && u == 0 && lossRegularization == false) { // use -beta(0, 0) as cost.
+      costs[bTgt] = DTYPE(-out);
+    }
+    else if (t == 0 && u == 0 && lossRegularization == true) { // use -beta(0, 0) as cost.
+      costs[bTgt] = DTYPE(-out-lossRegMap[idxr(bTgt, t, u)]);
     }
   }
 

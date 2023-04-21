@@ -48,8 +48,8 @@ typedef struct Options {
 
   // loss regularization
   bool lossRegularization_;
-  bool lossRegularizationWeight_;
-  bool lossRegularizationSigma_;
+  double lossRegularizationWeight_;
+  double lossRegularizationSigma_;
 
   Options()
       : device_(UNDEFINED),

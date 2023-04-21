@@ -57,17 +57,7 @@ HOST_AND_DEVICE void ComputeGradientsElement(
   }
 
   int costIdx = bTgt * maxT * maxU;  
-  CAST_DTYPE cc1 = -(betas[costIdx]);// = -(betas[costIdx]);
-  CAST_DTYPE cc2 = lossRegMap[costIdx];
-  //CAST_DTYPE cc2 = -(betas[costIdx]);// = -(betas[costIdx]);
-#if 0
-  if ( 1 ){
-    Indexer3D idxr3(maxT, maxU);
-    //cost = cost + lossRegWeight * lossRegMap[idxr3(bTgt, 0, 0)] * cost;    
-    //cost = cc1 + cc2;
-  }
-#endif
-  CAST_DTYPE cost = cc1 + cc2;
+  CAST_DTYPE cost = -(betas[costIdx]);
   
   Indexer2D idxr2(maxU - 1);
 
@@ -112,11 +102,10 @@ HOST_AND_DEVICE void ComputeGradientsElement(
     } else {
       gradients[b_t_u_d] = std::exp(g + betas[idx_b_t_u]);
     }
-#if 1 
-    if (lossRegularization) {      
-      Indexer3D idxr3(maxT, maxU);
-      gradients[b_t_u_d] = gradients[b_t_u_d] + 
-          lossRegWeight * lossRegMap[idxr3(bTgt, t, u)] * gradients[b_t_u_d];
+#if 1
+    if (lossRegularization) {
+      auto lambda = lossRegMap[idx_b_t_u];
+      gradients[b_t_u_d] = (1 + lambda) * gradients[idx_b_t_u];
     }
 #endif
     
