@@ -102,7 +102,7 @@ HOST_AND_DEVICE void ComputeGradientsElement(
     } else {
       gradients[b_t_u_d] = std::exp(g + betas[idx_b_t_u]);
     }
-#if 1
+#if 0
     if (lossRegularization) {
       auto lambda = std::exp(lossRegMap[idx_b_t_u]);
       gradients[b_t_u_d] = (lambda) * gradients[idx_b_t_u];

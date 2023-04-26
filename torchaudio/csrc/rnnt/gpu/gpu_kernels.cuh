@@ -231,14 +231,9 @@ __device__ void ComputeBetasCosts(
 
   Indexer3D idxr(maxT, maxU);
 
-  if (t == T - 2 && u == U - 2 && lossRegularization == false) {
+  if (t == T - 2 && u == U - 2) {
     betas[idxr(bTgt, T - 1, U - 1)] =
         logProbs[(idxr(bTgt, T - 1, U - 1) << 1) + LOG_PROBS_SKIP_IDX];
-  }
-  else if (t == T - 2 && u == U - 2 && lossRegularization == true){
-    betas[idxr(bTgt, T - 1, U - 1)] =
-        logProbs[(idxr(bTgt, T - 1, U - 1) << 1) + LOG_PROBS_SKIP_IDX] 
-        + lossRegMap[idxr(bTgt, T - 1, U - 1)];
   }
 
   if (blockIdx.x > 0) { // wait for previous warp (in t-axis) is ready.
@@ -251,17 +246,12 @@ __device__ void ComputeBetasCosts(
     }
   }
 
-  if (t == T - 2 && u >= 0 && lossRegularization == false) {
+  if (t == T - 2 && u >= 0) {
     betas[idxr(bTgt, T - 1, u)] = betas[idxr(bTgt, T - 1, u + 1)] +
         logProbs[(idxr(bTgt, T - 1, u) << 1) + LOG_PROBS_EMIT_IDX];
   }
-  else if(t == T - 2 && u >= 0 && lossRegularization == true) {
-    betas[idxr(bTgt, T - 1, u)] = betas[idxr(bTgt, T - 1, u + 1)] +
-        logProbs[(idxr(bTgt, T - 1, u) << 1) + LOG_PROBS_EMIT_IDX]
-        + lossRegMap[idxr(bTgt, T - 1, u)];
-  }
 
-  if (blockIdx.y == 0 && t >= 0 && lossRegularization == false) {
+  if (blockIdx.y == 0 && t >= 0) {
     CAST_DTYPE skip_prob =
         logProbs[(idxr(bTgt, t, U - 1) << 1) + LOG_PROBS_SKIP_IDX];
     CAST_DTYPE val;
@@ -277,25 +267,8 @@ __device__ void ComputeBetasCosts(
     betas[idxr(bTgt, t, U - 1)] =
         betas[idxr(bTgt, T - 1 - blockIdx.x * blockDim.x, U - 1)] + skip_prob;
   }
-  else if (blockIdx.y == 0 && t >= 0 && lossRegularization == true) {
-    CAST_DTYPE skip_prob =
-        logProbs[(idxr(bTgt, t, U - 1) << 1) + LOG_PROBS_SKIP_IDX];
-    CAST_DTYPE val;
 
-#pragma unroll
-    for (int i = 1; i < warpSize; i <<= 1) {
-      val = __shfl_up_sync(0xffffffff, skip_prob, i);
-      if (i <= threadIdx.x) {
-        skip_prob = skip_prob + val;
-      }
-    }
-
-    betas[idxr(bTgt, t, U - 1)] =
-        betas[idxr(bTgt, T - 1 - blockIdx.x * blockDim.x, U - 1)] + skip_prob 
-        + lossRegMap[idxr(bTgt, t, U - 1)];
-  }
-
-  if (t >= 0 && u >= 0 && lossRegularization == false) {
+  if (t >= 0 && u >= 0) {
     CAST_DTYPE skip_prob =
         logProbs[(idxr(bTgt, t, u) << 1) + LOG_PROBS_SKIP_IDX];
     CAST_DTYPE emit_prob =
@@ -314,43 +287,16 @@ __device__ void ComputeBetasCosts(
         out = val;
       }
     }
+
+    //if(lossRegularization){
+    //  out = val + lossRegMap[idxr(bTgt, t, u)];
+    //}
 
     betas[idxr(bTgt, t, u)] = out;
 
     if (t == 0 && u == 0) { // use -beta(0, 0) as cost.
       costs[bTgt] = DTYPE(-out);
     }
-  }
-  else if (t >= 0 && u >= 0 && lossRegularization == true) {
-    CAST_DTYPE skip_prob =
-        logProbs[(idxr(bTgt, t, u) << 1) + LOG_PROBS_SKIP_IDX];
-    CAST_DTYPE emit_prob =
-        logProbs[(idxr(bTgt, t, u) << 1) + LOG_PROBS_EMIT_IDX];
-
-    CAST_DTYPE skip = betas[idxr(bTgt, t + threadIdx.x + 1, u)] + skip_prob;
-    CAST_DTYPE emit = betas[idxr(bTgt, t, u + 1)] + emit_prob;
-
-    CAST_DTYPE val = math::lse(skip, emit);
-    CAST_DTYPE out = val;
-
-    for (int i = 1; i < warpSize; ++i) {
-      val = __shfl_up_sync(0xffffffff, val, 1);
-      if (i == threadIdx.x) {
-        val = math::lse(val + skip_prob, emit);
-        out = val;
-      }
-    }
-
-    betas[idxr(bTgt, t, u)] = out + lossRegMap[idxr(bTgt, t, u)];
-
-    if (t == 0 && u == 0) { // use -beta(0, 0) as cost.
-      costs[bTgt] = DTYPE(-out);
-    }
-    /*
-    else if (t == 0 && u == 0 && lossRegularization == true) { // use -beta(0, 0) as cost.
-      costs[bTgt] = DTYPE(-out-lossRegMap[idxr(bTgt, t, u)]);
-    }
-    */
   }
 
   if (threadIdx.x == 0) {

@@ -315,13 +315,11 @@ status_t Compute(
                   << betas[idxr(b, 0, 0)]
                   << " MY_DEBUG2" << std::endl;
       }
-      float tmp = std::log(5.5);
       int myt=0;
       int myu=0;
-      std::cout << tmp << std::endl;
       std::cout << "loss regularization weight: " << loss_regularization_weight << std::endl;
       std::cout << "loss regularization sigma: " << loss_regularization_sigma << std::endl;
-      float mydenom = 1.0 / sqrt( 2 * M_PI * pow(loss_regularization_weight, 2 ));
+      float mydenom = 1.0 / sqrt( 2 * M_PI * pow(loss_regularization_sigma, 2 ));
       float myslope = max_T / max_U;
       float result = log(1 + loss_regularization_weight * exp(-(pow(myt-myslope * myu, 2))/(2*pow(loss_regularization_sigma, 2)))*mydenom);
       std::cout << "loss regularization map " <<myt << ", " << myu <<": " <<result <<std::endl;
