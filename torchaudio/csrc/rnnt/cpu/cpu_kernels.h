@@ -85,6 +85,42 @@ status_t LogSumExp2D(int N, int D, const DTYPE* logits, CAST_DTYPE* outputs) {
 }
 
 template <typename DTYPE, typename CAST_DTYPE>
+status_t ComputeGaussianMap(
+        int maxSrcLen,
+        int maxTgtLen,
+        int D,
+        const int* srcLengths,
+        const int* tgtLengths,
+        int B,
+        DTYPE slope,
+        DTYPE sigma,
+        DTYPE weight,
+        DTYPE denom,
+        CAST_DTYPE* outputs) {
+  int maxT = maxSrcLen;
+  int maxU = maxTgtLen;
+  std::vector<TensorView<CAST_DTYPE>> lossRegMap;
+
+  for (int b = 0; b < B; ++b) {
+     lossRegMap.push_back(
+        TensorView<CAST_DTYPE>({maxT, maxU}, outputs + b * maxT * maxU));
+  }
+
+  for(int b = 0; b < B; b++){
+    for(int t = 0; t < srcLengths[b]; t++){
+      for(int u=0; u < tgtLengths[b]+1; u++){
+        lossRegMap[b]({t, u}) = std::log(1 + weight * std::exp( -(t - slope * u) * (t - slope * u) / (2 * sigma * sigma)) * denom);
+        if( lossRegMap[b]({t, u}) == -INFINITY ){
+            lossRegMap[b]({t, u}) = std::log(1); //0
+        }
+      }
+    }
+  }
+
+  return SUCCESS;
+}
+
+template <typename DTYPE, typename CAST_DTYPE>
 void ComputeLogProbsOneSequence(
     const Options& options,
     TensorView<const DTYPE>& logits,
@@ -192,29 +228,59 @@ DTYPE ComputeBetaOneSequence(
     TensorView<const LogProbs<DTYPE>>& logProbs,
     int srcLen,
     int tgtLen,
-    TensorView<DTYPE>& beta) {
+    TensorView<DTYPE>& beta,
+    const bool fastEmit,
+    const DTYPE fastEmitWeight,
+    const bool lossRegularization,
+    const DTYPE lossRegWeight,
+    TensorView<DTYPE>& lossRegMap ) {
   const int& T = srcLen;
   const int& U = tgtLen;
+  DTYPE backward_score;// = beta({0, 0});
 
-  beta({T - 1, U - 1}) = logProbs({T - 1, U - 1}).skip();
+  if( !lossRegularization ){
+    beta({T - 1, U - 1}) = logProbs({T - 1, U - 1}).skip();
 
-  for (int t = T - 2; t >= 0; --t) { // u == U - 1.
-    beta({t, U - 1}) = beta({t + 1, U - 1}) + logProbs({t, U - 1}).skip();
-  }
-
-  for (int u = U - 2; u >= 0; --u) { // t == T - 1.
-    beta({T - 1, u}) = beta({T - 1, u + 1}) + logProbs({T - 1, u}).emit();
-  }
-
-  for (int t = T - 2; t >= 0; --t) {
-    for (int u = U - 2; u >= 0; --u) {
-      beta({t, u}) = math::lse(
-          beta({t + 1, u}) + logProbs({t, u}).skip(),
-          beta({t, u + 1}) + logProbs({t, u}).emit());
+    for (int t = T - 2; t >= 0; --t) { // u == U - 1.
+      beta({t, U - 1}) = beta({t + 1, U - 1}) + logProbs({t, U - 1}).skip();
     }
-  }
 
-  DTYPE backward_score = beta({0, 0});
+    for (int u = U - 2; u >= 0; --u) { // t == T - 1.
+      beta({T - 1, u}) = beta({T - 1, u + 1}) + logProbs({T - 1, u}).emit();
+    }
+
+    for (int t = T - 2; t >= 0; --t) {
+      for (int u = U - 2; u >= 0; --u) {
+        beta({t, u}) = math::lse(
+            beta({t + 1, u}) + logProbs({t, u}).skip(),
+            beta({t, u + 1}) + logProbs({t, u}).emit());
+      }
+    }
+
+    backward_score = beta({0, 0});
+  }
+  else{
+    beta({T - 1, U - 1}) = logProbs({T - 1, U - 1}).skip() + lossRegMap({T-1, U-1});
+
+    for (int t = T - 2; t >= 0; --t) { // u == U - 1.
+      beta({t, U - 1}) = beta({t + 1, U - 1}) + logProbs({t, U - 1}).skip() + lossRegMap({t, U - 1});
+    }
+
+    for (int u = U - 2; u >= 0; --u) { // t == T - 1.
+      beta({T - 1, u}) = beta({T - 1, u + 1}) + logProbs({T - 1, u}).emit() + lossRegMap({T - 1, u});
+    }
+
+    for (int t = T - 2; t >= 0; --t) {
+      for (int u = U - 2; u >= 0; --u) {
+        beta({t, u}) = math::lse(
+            beta({t + 1, u}) + logProbs({t, u}).skip(),
+            beta({t, u + 1}) + logProbs({t, u}).emit()) + lossRegMap({t, u});
+      }
+    }
+
+    backward_score = beta({0, 0});
+
+  }
 
   return backward_score;
 }
@@ -227,7 +293,12 @@ DTYPE ComputeAlphaOrBetaOneSequence(
     int srcLen,
     int tgtLen,
     TensorView<DTYPE>& alpha,
-    TensorView<DTYPE>& beta) {
+    TensorView<DTYPE>& beta,
+    const bool fastEmit,
+    const DTYPE fastEmitWeight,
+    const bool lossRegularization,
+    const DTYPE lossRegWeight,
+    TensorView<DTYPE>& lossRegMap ) {
   if (thread & 1) {
     return ComputeAlphaOneSequence<DTYPE>(
         /*options=*/options,
@@ -241,7 +312,12 @@ DTYPE ComputeAlphaOrBetaOneSequence(
         /*logProbs=*/logProbs,
         /*srcLen=*/srcLen,
         /*tgtLen=*/tgtLen,
-        /*beta=*/beta);
+        /*beta=*/beta,
+        fastEmit,
+        fastEmitWeight,
+        lossRegularization,
+        lossRegWeight,
+        lossRegMap);
   }
 }
 
@@ -253,10 +329,16 @@ void ComputeAlphasBetas(
     const int* tgtLengths,
     CAST_DTYPE* alphas,
     CAST_DTYPE* betas,
-    DTYPE* costs) {
+    DTYPE* costs,
+    const bool fastEmit,
+    const DTYPE fastEmitWeight,
+    const bool lossRegularization,
+    const DTYPE lossRegWeight,
+    CAST_DTYPE* lossRegMap) {
   std::vector<TensorView<const LogProbs<CAST_DTYPE>>> seqlogProbs;
   std::vector<TensorView<CAST_DTYPE>> seq_alphas;
   std::vector<TensorView<CAST_DTYPE>> seq_betas;
+  std::vector<TensorView<CAST_DTYPE>> seq_lossRegMap;
 
   const int& B = options.batchSize_;
   const int& maxT = options.maxSrcLen_;
@@ -272,20 +354,27 @@ void ComputeAlphasBetas(
         TensorView<CAST_DTYPE>({maxT, maxU}, alphas + b * maxT * maxU));
     seq_betas.push_back(
         TensorView<CAST_DTYPE>({maxT, maxU}, betas + b * maxT * maxU));
+    seq_lossRegMap.push_back(
+        TensorView<CAST_DTYPE>({maxT, maxU}, lossRegMap + b * maxT * maxU));
   }
 
   std::vector<CAST_DTYPE> scores(B << 1);
   //#pragma omp parallel for
   for (int t = 0; t < (B << 1); ++t) { // use max 2 * B threads.
     int i = (t >> 1);
-    scores[t] = ComputeAlphaOrBetaOneSequence<CAST_DTYPE>(
+    scores[t] = ComputeAlphaOrBetaOneSequence<DTYPE>(
         /*thread=*/t,
         /*options=*/options,
         /*logProbs=*/seqlogProbs[i],
         /*srcLen=*/srcLengths[i],
         /*tgtLen=*/tgtLengths[i] + 1, // with prepended blank.
         /*alpha=*/seq_alphas[i],
-        /*beta=*/seq_betas[i]);
+        /*beta=*/seq_betas[i],
+        fastEmit,
+        fastEmitWeight,
+        lossRegularization,
+        lossRegWeight,
+        seq_lossRegMap[i]);
   }
   for (int b = 0; b < B; ++b) {
     costs[b] = -scores[b << 1];
@@ -302,7 +391,12 @@ void ComputeGradientsOneSequence(
     TensorView<const CAST_DTYPE>& denom,
     TensorView<const CAST_DTYPE>& alpha,
     TensorView<const CAST_DTYPE>& beta,
-    TensorView<DTYPE>& gradients) {
+    TensorView<DTYPE>& gradients,
+    const bool fastEmit,
+    const DTYPE fastEmitWeight,
+    const bool lossRegularization,
+    const DTYPE lossRegWeight,
+    TensorView<const DTYPE>& lossRegMap) {
   // don't set gradients to zero to here as gradients might reuse memory from
   // logits
 
@@ -320,31 +414,62 @@ void ComputeGradientsOneSequence(
   // (function merging) in below paper:
   // https://www.microsoft.com/en-us/research/uploads/prod/2019/10/RNNT.pdf
 
-  for (int t = 0; t < T; ++t) {
-    for (int u = 0; u < U; ++u) {
-      CAST_DTYPE c = alpha({t, u}) + cost - denom({t, u});
-      for (int d = 0; d < D; ++d) {
-        CAST_DTYPE g = CAST_DTYPE(logits({t, u, d})) + c;
-        if (d == blank && t == T - 1 && u == U - 1) { // last blank transition.
-          gradients({t, u, d}) = std::exp(g + beta({t, u})) - std::exp(g);
-        } else if (d == blank && t < T - 1) {
-          gradients({t, u, d}) =
-              std::exp(g + beta({t, u})) - std::exp(g + beta({t + 1, u}));
-        } else if (u < U - 1 && d == targets[u]) {
-          gradients({t, u, d}) =
-              std::exp(g + beta({t, u})) - std::exp(g + beta({t, u + 1}));
-        } else {
-          gradients({t, u, d}) = std::exp(g + beta({t, u}));
-        }
+  if( lossRegularization ){
+    for (int t = 0; t < T; ++t) {
+      for (int u = 0; u < U; ++u) {
+        CAST_DTYPE c = alpha({t, u}) + cost - denom({t, u});
+        for (int d = 0; d < D; ++d) {
+          CAST_DTYPE g = CAST_DTYPE(logits({t, u, d})) + c;
+          if (d == blank && t == T - 1 && u == U - 1) { // last blank transition.
+            gradients({t, u, d}) = std::exp(g + beta({t, u})) - std::exp(g) + std::exp(lossRegMap({t, u}));
+          } else if (d == blank && t < T - 1) {
+            gradients({t, u, d}) =
+                std::exp(g + beta({t, u})) - std::exp(g + beta({t + 1, u})) + std::exp(lossRegMap({t, u}));
+          } else if (u < U - 1 && d == targets[u]) {
+            gradients({t, u, d}) =
+                std::exp(g + beta({t, u})) - std::exp(g + beta({t, u + 1})) + std::exp(lossRegMap({t, u}));
+          } else {
+            gradients({t, u, d}) = std::exp(g + beta({t, u})) + std::exp(lossRegMap({t, u}));
+          }
 
-        if (clamp > 0) {
-          gradients({t, u, d}) =
-              math::min(CAST_DTYPE(gradients({t, u, d})), clamp);
-          gradients({t, u, d}) =
-              math::max(CAST_DTYPE(gradients({t, u, d})), -clamp);
+          if (clamp > 0) {
+            gradients({t, u, d}) =
+                math::min(CAST_DTYPE(gradients({t, u, d})), clamp);
+            gradients({t, u, d}) =
+                math::max(CAST_DTYPE(gradients({t, u, d})), -clamp);
+          }
         }
       }
     }
+  }
+  else{
+    for (int t = 0; t < T; ++t) {
+      for (int u = 0; u < U; ++u) {
+        CAST_DTYPE c = alpha({t, u}) + cost - denom({t, u});
+        for (int d = 0; d < D; ++d) {
+          CAST_DTYPE g = CAST_DTYPE(logits({t, u, d})) + c;
+          if (d == blank && t == T - 1 && u == U - 1) { // last blank transition.
+            gradients({t, u, d}) = std::exp(g + beta({t, u})) - std::exp(g);
+          } else if (d == blank && t < T - 1) {
+            gradients({t, u, d}) =
+                std::exp(g + beta({t, u})) - std::exp(g + beta({t + 1, u}));
+          } else if (u < U - 1 && d == targets[u]) {
+            gradients({t, u, d}) =
+                std::exp(g + beta({t, u})) - std::exp(g + beta({t, u + 1}));
+          } else {
+            gradients({t, u, d}) = std::exp(g + beta({t, u}));
+          }
+
+          if (clamp > 0) {
+            gradients({t, u, d}) =
+                math::min(CAST_DTYPE(gradients({t, u, d})), clamp);
+            gradients({t, u, d}) =
+                math::max(CAST_DTYPE(gradients({t, u, d})), -clamp);
+          }
+        }
+      }
+    }
+
   }
 
   // zero out the rest of the gradients, necessary when reusing logits memory
@@ -379,13 +504,19 @@ void ComputeGradients(
     const CAST_DTYPE* denominators,
     const CAST_DTYPE* alphas,
     const CAST_DTYPE* betas,
-    DTYPE* gradients) {
+    DTYPE* gradients,
+    const bool fastEmit,
+    const DTYPE fastEmitWeight,
+    const bool lossRegularization,
+    const DTYPE lossRegWeight,
+    const CAST_DTYPE* lossRegMap) {
   std::vector<TensorView<const DTYPE>> seqLogits;
   std::vector<const int*> seqTargets;
   std::vector<TensorView<const CAST_DTYPE>> seqDenoms;
   std::vector<TensorView<const CAST_DTYPE>> seq_alphas;
   std::vector<TensorView<const CAST_DTYPE>> seq_betas;
   std::vector<TensorView<DTYPE>> seq_gradients;
+  std::vector<TensorView<const CAST_DTYPE>> seq_lossRegMap;
 
   const int& B = options.batchSize_;
   const int& maxT = options.maxSrcLen_;
@@ -403,6 +534,8 @@ void ComputeGradients(
         TensorView<const CAST_DTYPE>({maxT, maxU}, betas + b * maxT * maxU));
     seq_gradients.push_back(
         TensorView<DTYPE>({maxT, maxU, D}, gradients + b * maxT * maxU * D));
+    seq_lossRegMap.push_back(
+        TensorView<const CAST_DTYPE>({maxT, maxU}, lossRegMap + b * maxT * maxU));
   }
 
   //#pragma omp parallel for
@@ -416,7 +549,12 @@ void ComputeGradients(
         /*denom=*/seqDenoms[b],
         /*alpha=*/seq_alphas[b],
         /*beta=*/seq_betas[b],
-        /*gradients=*/seq_gradients[b]);
+        /*gradients=*/seq_gradients[b],
+        fastEmit,
+        fastEmitWeight,
+        lossRegularization,
+        lossRegWeight,
+        seq_lossRegMap[b]);
   }
 }
 
@@ -487,7 +625,8 @@ void ComputeBetas(
         /*logProbs=*/seqlogProbs[i],
         /*srcLen=*/srcLengths[i],
         /*tgtLen=*/tgtLengths[i] + 1, // with prepended blank.
-        /*betas=*/seq_betas[i]);
+        /*betas=*/seq_betas[i],
+        false, 0.0, false, 0.0, seq_betas[i]);
   }
 }
 
