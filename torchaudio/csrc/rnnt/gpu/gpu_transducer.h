@@ -323,7 +323,7 @@ status_t Compute(
       std::cout << "loss regularization sigma: " << loss_regularization_sigma << std::endl;
       float mydenom = 1.0 / sqrt( 2 * M_PI * pow(loss_regularization_weight, 2 ));
       float myslope = max_T / max_U;
-      float result = log(loss_regularization_weight * exp(-(pow(myt-myslope * myu, 2))/(2*pow(loss_regularization_sigma, 2)))*mydenom);
+      float result = log(1 + loss_regularization_weight * exp(-(pow(myt-myslope * myu, 2))/(2*pow(loss_regularization_sigma, 2)))*mydenom);
       std::cout << "loss regularization map " <<myt << ", " << myu <<": " <<result <<std::endl;
       std::cout << options << std::endl;
 
@@ -415,6 +415,7 @@ status_t Compute(
                   << " MY_DEBUG3" << std::endl;
       }
 #endif
+#ifdef MY_DEBUG2
     if(incount == 2){
       exit(3);
     }
@@ -422,6 +423,7 @@ status_t Compute(
       std::cout << std::endl;
       incount++;
     }
+#endif
 
     if (cudaGetLastError() != cudaSuccess) {
       return COMPUTE_GRADIENTS_FAILED;

@@ -44,11 +44,10 @@ __global__ void ComputeGaussianMap(
   
   //for blank
   //TODO: check if it is thread safe
-  outputs[idx] = std::log(weight * std::exp( -(t - slope * u) * (t - slope * u) / (2 * sigma * sigma)) * denom);
+  outputs[idx] = std::log(1 + weight * std::exp( -(t - slope * u) * (t - slope * u) / (2 * sigma * sigma)) * denom);
   if( outputs[idx] == -INFINITY ){
-      outputs[idx] = std::log(10e-64);
+      outputs[idx] = std::log(1);
   }
-  //outputs[idx] = 10;
 }
 
 template <typename DTYPE, typename CAST_DTYPE>
@@ -344,12 +343,14 @@ __device__ void ComputeBetasCosts(
 
     betas[idxr(bTgt, t, u)] = out + lossRegMap[idxr(bTgt, t, u)];
 
-    if (t == 0 && u == 0 && lossRegularization == false) { // use -beta(0, 0) as cost.
+    if (t == 0 && u == 0) { // use -beta(0, 0) as cost.
       costs[bTgt] = DTYPE(-out);
     }
+    /*
     else if (t == 0 && u == 0 && lossRegularization == true) { // use -beta(0, 0) as cost.
       costs[bTgt] = DTYPE(-out-lossRegMap[idxr(bTgt, t, u)]);
     }
+    */
   }
 
   if (threadIdx.x == 0) {
