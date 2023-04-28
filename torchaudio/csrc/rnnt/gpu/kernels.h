@@ -79,7 +79,15 @@ HOST_AND_DEVICE void ComputeGradientsElement(
     return;
   }
 
-  CAST_DTYPE c = alphas[idx_b_t_u] + cost - denominators[idx_b_t_u];
+  CAST_DTYPE c; // = alphas[idx_b_t_u] + cost - denominators[idx_b_t_u];  
+  if( lossRegularization ){
+    c = alphas[idx_b_t_u] + cost - denominators[idx_b_t_u] + lossRegMap[idx_b_t_u];
+  }
+  else{
+    c = alphas[idx_b_t_u] + cost - denominators[idx_b_t_u];
+  }
+  //CAST_DTYPE c = alphas[idx_b_t_u] + cost - denominators[idx_b_t_u];
+  
   for (int d = 0; d < D; ++d) {
     int b_t_u_d = idx_b_t_u * D + d;
     CAST_DTYPE g = CAST_DTYPE(logits[b_t_u_d]) + c;
@@ -102,12 +110,6 @@ HOST_AND_DEVICE void ComputeGradientsElement(
     } else {
       gradients[b_t_u_d] = std::exp(g + betas[idx_b_t_u]);
     }
-#if 0
-    if (lossRegularization) {
-      auto lambda = std::exp(lossRegMap[idx_b_t_u]);
-      gradients[b_t_u_d] = (lambda) * gradients[idx_b_t_u];
-    }
-#endif
       
     if (clamp > 0) {
       auto g = CAST_DTYPE(gradients[b_t_u_d]);

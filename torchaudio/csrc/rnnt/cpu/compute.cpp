@@ -139,7 +139,7 @@ std::tuple<torch::Tensor, c10::optional<torch::Tensor>> compute(
     //      /*target_lengths=*/target_lengths.data_ptr<int>(),
     //      /*costs=*/costs.data_ptr<c10::Half>(),
     //      /*gradients=*/gradients->data_ptr<c10::Half>());
-    //  break;
+    // break;
     //}
     default: {
       break;

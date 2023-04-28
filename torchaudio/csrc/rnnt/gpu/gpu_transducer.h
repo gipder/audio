@@ -106,8 +106,7 @@ status_t ComputeMap(
             /*maxTgtLen*/max_U,
             /*srcLengths*/srcLengths,
             /*tgtLengths*/tgtLengths,
-            /*nHypothesis*/H,
-            /*slope*/slope,
+            /*nHypothesis*/H, // /*slope*/slope,
             /*sigma*/sigma,
             /*weight*/weight,
             /*denom*/denom,
@@ -191,8 +190,7 @@ status_t Compute(
         max_U,
         srcLengths,
         tgtLengths,
-        H,
-        slope,
+        H, //slope,        
         sigma,
         weight,
         denom,
@@ -288,7 +286,7 @@ status_t Compute(
   if (gradients != nullptr) { // compute gradients.
     // don't set gradients to zero to here as gradients might reuse memory from
     // logits
-#define MY_DEBUG2
+//#define MY_DEBUG2
 #ifdef MY_DEBUG2
       int mSize = options.BTU();
       DTYPE* garbage = new DTYPE[mSize];

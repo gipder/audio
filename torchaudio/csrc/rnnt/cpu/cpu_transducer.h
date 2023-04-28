@@ -1,5 +1,5 @@
 #pragma once
-#define GARBAGE_DEBUG
+//#define GARBAGE_DEBUG
 #include <torchaudio/csrc/rnnt/cpu/cpu_kernels.h>
 #include <torchaudio/csrc/rnnt/workspace.h>
 
@@ -57,7 +57,6 @@ status_t Compute(
       DTYPE sigma = options.lossRegularizationSigma_;
       DTYPE weight = options.lossRegularizationWeight_;
       DTYPE denom = 1.0 / sqrt( 2 * M_PI * sigma * sigma );
-      std::cout << "GARBAGE IS WORKING" << std::endl;
       
       ComputeGaussianMap<DTYPE, CAST_DTYPE>(
         maxT,

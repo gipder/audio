@@ -17,8 +17,7 @@ __global__ void ComputeGaussianMap(
     int maxTgtLen,
     const int* srcLengths,
     const int* tgtLengths,
-    int H,
-    DTYPE slope,
+    int H, //DTYPE slope,
     DTYPE sigma,
     DTYPE weight, 
     DTYPE denom, // 1/sqrt( 2*pi*sigma^2 )
@@ -30,6 +29,7 @@ __global__ void ComputeGaussianMap(
   const int bSrc = bTgt / H;
   const int T = srcLengths[bSrc];
   const int U = tgtLengths[bTgt] + 1;
+  DTYPE slope = (DTYPE)T / (DTYPE)U;
 
   const int t = blockIdx.x * blockDim.x + threadIdx.x;
   const int u = blockIdx.y;
@@ -46,7 +46,7 @@ __global__ void ComputeGaussianMap(
   //TODO: check if it is thread safe
   outputs[idx] = std::log(1 + weight * std::exp( -(t - slope * u) * (t - slope * u) / (2 * sigma * sigma)) * denom);
   if( outputs[idx] == -INFINITY ){
-      outputs[idx] = std::log(1);
+      outputs[idx] = 0; //std::log(1)
   }
 }
 
@@ -163,7 +163,7 @@ __device__ void ComputeAlphas(
     val = alphas[idxr(bTgt, blockIdx.x * blockDim.x, 0)];
     alphas[idxr(bTgt, t, 0)] = skip_prob + val;
   }
-
+  
   if (t < T && u < U) {
     CAST_DTYPE skip_prob =
         logProbs[(idxr(bTgt, t - 1, u) << 1) + LOG_PROBS_SKIP_IDX];
@@ -232,10 +232,18 @@ __device__ void ComputeBetasCosts(
   Indexer3D idxr(maxT, maxU);
 
   if (t == T - 2 && u == U - 2) {
+    CAST_DTYPE regMap;
+    if( lossRegularization ){
+       regMap = lossRegMap[idxr(bTgt, t, u)];
+    }
+    else{
+      regMap = 0;
+    }
     betas[idxr(bTgt, T - 1, U - 1)] =
-        logProbs[(idxr(bTgt, T - 1, U - 1) << 1) + LOG_PROBS_SKIP_IDX];
+        logProbs[(idxr(bTgt, T - 1, U - 1) << 1) + LOG_PROBS_SKIP_IDX] + regMap;
+    
   }
-
+  
   if (blockIdx.x > 0) { // wait for previous warp (in t-axis) is ready.
     while (atomicAdd(counter, 0) < blockIdx.x) {
     }
@@ -247,8 +255,15 @@ __device__ void ComputeBetasCosts(
   }
 
   if (t == T - 2 && u >= 0) {
+    CAST_DTYPE regMap;
+    if( lossRegularization ){
+       regMap = lossRegMap[idxr(bTgt, t, u)];
+    }
+    else{
+      regMap = 0;
+    }
     betas[idxr(bTgt, T - 1, u)] = betas[idxr(bTgt, T - 1, u + 1)] +
-        logProbs[(idxr(bTgt, T - 1, u) << 1) + LOG_PROBS_EMIT_IDX];
+        logProbs[(idxr(bTgt, T - 1, u) << 1) + LOG_PROBS_EMIT_IDX] + regMap;
   }
 
   if (blockIdx.y == 0 && t >= 0) {
@@ -264,8 +279,15 @@ __device__ void ComputeBetasCosts(
       }
     }
 
+    CAST_DTYPE regMap;
+    if( lossRegularization ){
+       regMap = lossRegMap[idxr(bTgt, t, u)];
+    }
+    else{
+      regMap = 0;
+    }
     betas[idxr(bTgt, t, U - 1)] =
-        betas[idxr(bTgt, T - 1 - blockIdx.x * blockDim.x, U - 1)] + skip_prob;
+        betas[idxr(bTgt, T - 1 - blockIdx.x * blockDim.x, U - 1)] + skip_prob + regMap;
   }
 
   if (t >= 0 && u >= 0) {
@@ -287,15 +309,19 @@ __device__ void ComputeBetasCosts(
         out = val;
       }
     }
+    
+    CAST_DTYPE regMap;
+    if( lossRegularization ){
+       regMap = lossRegMap[idxr(bTgt, t, u)];
+    }
+    else{
+      regMap = 0;
+    }
 
-    //if(lossRegularization){
-    //  out = val + lossRegMap[idxr(bTgt, t, u)];
-    //}
-
-    betas[idxr(bTgt, t, u)] = out;
+    betas[idxr(bTgt, t, u)] = out + regMap;
 
     if (t == 0 && u == 0) { // use -beta(0, 0) as cost.
-      costs[bTgt] = DTYPE(-out);
+      costs[bTgt] = DTYPE(-(out + regMap));
     }
   }
 
