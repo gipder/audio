@@ -75,53 +75,6 @@ status_t LogSumExp2D(
   return SUCCESS;
 }
 
-template <typename DTYPE, typename CAST_DTYPE>
-status_t ComputeMap(
-    const Workspace<CAST_DTYPE>& workspace,
-    const int* srcLengths,
-    const int* tgtLengths,
-    CAST_DTYPE* outputs) {
-  {
-    const Options& options = workspace.GetOptions();
-
-    const cudaStream_t& stream = options.stream_;
-    const int& B = options.batchSize_;
-    const int& H = options.nHypos_;
-    const int& max_T = options.maxSrcLen_;
-    const int& max_U = options.maxTgtLen_;
-    const int& D = options.numTargets_;
-    const int& blank = options.blank_;
-
-    int num_segments =
-          (max_T + MAX_THREADS_PER_BLOCK - 1) / MAX_THREADS_PER_BLOCK;
-    dim3 block_dims(num_segments, max_U, B * H);
-    dim3 thread_dims(MAX_THREADS_PER_BLOCK);
-
-    DTYPE slope = max_T / max_U;
-    DTYPE sigma = options.lossRegularizationSigma_;
-    DTYPE weight = options.lossRegularizationWeight_;
-    DTYPE denom = 1.0 / sqrt( 2 * M_PI * sigma * sigma );
-    ComputeGaussianMap<DTYPE, CAST_DTYPE><<<block_dims, thread_dims, 0, stream>>>(
-            /*maxSrcLen*/max_T,
-            /*maxTgtLen*/max_U,
-            /*srcLengths*/srcLengths,
-            /*tgtLengths*/tgtLengths,
-            /*nHypothesis*/H, // /*slope*/slope,
-            /*sigma*/sigma,
-            /*weight*/weight,
-            /*denom*/denom,
-            /*outputs*/outputs);
-
-    // BUGBUG: These error codes are only accurate when launching with
-    // blocking. Otherwise they usually reflect earlier errors.
-    if (cudaGetLastError() != cudaSuccess) {
-      return COMPUTE_DENOMINATOR_REDUCE_MAX_FAILED;
-    }
-  }
-
-  return SUCCESS;
-}
-
 // CPU version computMap
 
 // Inputs:
@@ -190,10 +143,8 @@ status_t Compute(
         max_U,
         srcLengths,
         tgtLengths,
-        H, //slope,        
-        sigma,
-        weight,
-        denom,
+        H, //slope, //sigma, denom,
+        weight,        
         workspace.GetPointerToLossRegularization()
       );
 //#define MY_DEBUG

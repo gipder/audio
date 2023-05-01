@@ -14,3 +14,5 @@ std::tuple<torch::Tensor, c10::optional<torch::Tensor>> rnnt_loss(
     bool loss_regularization,
     double loss_regularization_weight,
     double loss_regularization_sigma);
+
+

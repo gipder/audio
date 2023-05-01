@@ -17,10 +17,8 @@ __global__ void ComputeGaussianMap(
     int maxTgtLen,
     const int* srcLengths,
     const int* tgtLengths,
-    int H, //DTYPE slope,
-    DTYPE sigma,
-    DTYPE weight, 
-    DTYPE denom, // 1/sqrt( 2*pi*sigma^2 )
+    int H, //DTYPE slope, DTYPE sigma, DTYPE denom, // 1/sqrt( 2*pi*sigma^2 )
+    DTYPE weight,
     CAST_DTYPE* outputs) {
   const int& maxT = maxSrcLen;
   const int& maxU = maxTgtLen;
@@ -30,6 +28,8 @@ __global__ void ComputeGaussianMap(
   const int T = srcLengths[bSrc];
   const int U = tgtLengths[bTgt] + 1;
   DTYPE slope = (DTYPE)T / (DTYPE)U;
+  DTYPE sigma = (DTYPE)U;
+  DTYPE denom = 1.0 / std::sqrt(2 * M_PI * sigma * sigma);
 
   const int t = blockIdx.x * blockDim.x + threadIdx.x;
   const int u = blockIdx.y;
