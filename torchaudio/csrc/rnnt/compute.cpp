@@ -12,14 +12,16 @@ std::tuple<torch::Tensor, c10::optional<torch::Tensor>> rnnt_loss(
     double fast_emit_weight,
     bool loss_regularization,
     double loss_regularization_weight,
-    double loss_regularization_sigma) {
+    double loss_regularization_sigma,
+    bool loss_regularization_swing) {
   static auto op = torch::Dispatcher::singleton()
                        .findSchemaOrThrow("torchaudio::rnnt_loss", "")
                        .typed<decltype(rnnt_loss)>();
 
   return op.call(logits, targets, logit_lengths, target_lengths, blank, clamp, 
                  fast_emit, fast_emit_weight, 
-                 loss_regularization, loss_regularization_weight, loss_regularization_sigma);
+                 loss_regularization, loss_regularization_weight, loss_regularization_sigma,
+                 loss_regularization_swing);
 }
 
 TORCH_LIBRARY_FRAGMENT(torchaudio, m) {
@@ -34,5 +36,6 @@ TORCH_LIBRARY_FRAGMENT(torchaudio, m) {
       "float fast_emit_weight,"
       "bool loss_regularization,"
       "float loss_regularization_weight,"
-      "float loss_regularization_sigma) -> (Tensor, Tensor?)");
+      "float loss_regularization_sigma,"
+      "bool loss_regularization_swing) -> (Tensor, Tensor?)");            
 }

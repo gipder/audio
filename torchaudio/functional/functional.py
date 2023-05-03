@@ -1741,6 +1741,7 @@ def rnnt_loss(
     loss_regularization: bool = False,
     loss_regularization_weight: float = 0.0,
     loss_regularization_sigma: float = 1.0,
+    loss_regularization_swing: bool = False,
 ):
     """Compute the RNN Transducer loss from *Sequence Transduction with Recurrent Neural Networks*
     [:footcite:`graves2012sequence`].
@@ -1790,6 +1791,7 @@ def rnnt_loss(
         loss_regularization=loss_regularization,
         loss_regularization_weight=loss_regularization_weight,
         loss_regularization_sigma=loss_regularization_sigma,
+        loss_regularization_swing=loss_regularization_swing,
     )    
     if reduction == "mean":
         return costs.mean()

@@ -17,7 +17,8 @@ std::tuple<torch::Tensor, c10::optional<torch::Tensor>> compute(
     double fast_emit_weight,
     bool loss_regularization,
     double loss_regularization_weight,
-    double loss_regularization_sigma) {
+    double loss_regularization_sigma,
+    bool loss_Regularization_swing) {
   TORCH_CHECK(
       logits.device().type() == targets.device().type(),
       "logits and targets must be on the same device");

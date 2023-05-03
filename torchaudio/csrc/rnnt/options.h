@@ -41,7 +41,7 @@ typedef struct Options {
   int maxTgtLen_;
   // num_targets = D.
   int numTargets_;
-  
+
   // fast emit
   bool fastEmit_;
   double fastEmitWeight_;
@@ -50,6 +50,7 @@ typedef struct Options {
   bool lossRegularization_;
   double lossRegularizationWeight_;
   double lossRegularizationSigma_;
+  bool lossRegularizationSwing_;
 
   Options()
       : device_(UNDEFINED),
@@ -61,12 +62,13 @@ typedef struct Options {
         nHypos_(1),
         maxSrcLen_(0),
         maxTgtLen_(0),
-        numTargets_(0), 
+        numTargets_(0),
         fastEmit_(false),
         fastEmitWeight_(0.0),
         lossRegularization_(false),
         lossRegularizationWeight_(0.0),
-        lossRegularizationSigma_(1.0) {}
+        lossRegularizationSigma_(1.0),
+        lossRegularizationSwing_(false) {}
 
   int BU() const {
     return batchSize_ * maxTgtLen_ * nHypos_;
@@ -87,7 +89,8 @@ typedef struct Options {
        << "fastEmitWeight_=" << options.fastEmitWeight_ << ", "
        << "lossRegularization_=" << options.lossRegularization_ << ", "
        << "lossRegularizationWeight_=" << options.lossRegularizationWeight_ << ", "
-       << "lossRegularizationSigma_=" << options.lossRegularizationSigma_ << ")";       
+       << "lossRegularizationSigma_=" << options.lossRegularizationSigma_ << ", "
+       << "lossRegularizationSwing_=" << options.lossRegularizationSwing_ << ")";
 
     return os;
   }

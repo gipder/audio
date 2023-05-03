@@ -19,12 +19,14 @@ class RNNTLossFunction : public torch::autograd::Function<RNNTLossFunction> {
       double fast_emit_weight,
       bool loss_regularization,
       double loss_regularization_weight,
-      double loss_regularization_sigma) {
+      double loss_regularization_sigma,
+      bool loss_regularization_swing) {
     torch::Tensor undef;
     auto result =
         rnnt_loss(logits, targets, logit_lengths, target_lengths, blank, clamp,
                   fast_emit, fast_emit_weight,
-                  loss_regularization, loss_regularization_weight, loss_regularization_sigma);
+                  loss_regularization, loss_regularization_weight, loss_regularization_sigma,
+                  loss_regularization_swing);
     auto costs = std::get<0>(result);
     auto grads = std::get<1>(result).value_or(undef);
     ctx->save_for_backward({grads});
@@ -39,7 +41,7 @@ class RNNTLossFunction : public torch::autograd::Function<RNNTLossFunction> {
     auto grad_out = grad_outputs[0].view({-1, 1, 1, 1});
     auto result = grad * grad_out;
     torch::Tensor undef;
-    return {result, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef};
+    return {result, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef, undef};
   }
 };
 
@@ -54,12 +56,14 @@ std::tuple<torch::Tensor, c10::optional<torch::Tensor>> rnnt_loss_autograd(
     double fast_emit_weight,
     bool loss_regularization,
     double loss_regularization_weight,
-    double loss_regularization_sigma) {
+    double loss_regularization_sigma,
+    bool loss_regularization_swing) {
   at::AutoDispatchBelowADInplaceOrView guard;
   auto results = RNNTLossFunction::apply(
       logits, targets, logit_lengths, target_lengths, blank, clamp,
       fast_emit, fast_emit_weight,
-      loss_regularization, loss_regularization_weight, loss_regularization_sigma);
+      loss_regularization, loss_regularization_weight, loss_regularization_sigma,
+      loss_regularization_swing);
   return std::make_tuple(results[0], results[1]);
 }
 

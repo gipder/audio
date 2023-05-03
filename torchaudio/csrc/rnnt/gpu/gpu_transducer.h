@@ -6,6 +6,7 @@
 #include <torchaudio/csrc/rnnt/gpu/gpu_kernel_utils.cuh>
 #include <torchaudio/csrc/rnnt/gpu/gpu_kernels.cuh>
 #include <cmath>
+#include <random>
 
 namespace torchaudio {
 namespace rnnt {
@@ -111,6 +112,7 @@ status_t Compute(
   const bool loss_regularization = options.lossRegularization_;
   const DTYPE loss_regularization_weight = options.lossRegularizationWeight_;
   const DTYPE loss_regularization_sigma = options.lossRegularizationSigma_;
+  const bool loss_regularization_swing = options.lossRegularizationSwing_;
 
   { // compute denominators.
     status_t status = LogSumExp2D<DTYPE, CAST_DTYPE>(
@@ -136,17 +138,53 @@ status_t Compute(
       DTYPE sigma = options.lossRegularizationSigma_;
       DTYPE weight = options.lossRegularizationWeight_;
       DTYPE denom = 1.0 / sqrt( 2 * M_PI * sigma * sigma );
+
+      int *cpu_random_movings;
+      int *random_movings;
+      //std::cout << "GARBAGE" << std::endl;
+      //std::cout << loss_regularization_swing << std::endl;
+      if( loss_regularization_swing == true ){
+        //std::cout << "GARBAGE TRUE" << std::endl;
+        cpu_random_movings = new int[B];
+        std::random_device rd;
+        std::mt19937 gen(rd());
+
+        std::uniform_int_distribution<> dis(-sigma, sigma);
+        for(int i=0; i<B; ++i){
+          cpu_random_movings[i] = dis(gen);
+        }
+        cudaMalloc(&random_movings, B * sizeof(int));
+        cudaMemcpy(random_movings, cpu_random_movings, B * sizeof(int), cudaMemcpyHostToDevice);
+      }
+      else{
+        //std::cout << "GARBAGE FALSE" << std::endl;
+        cpu_random_movings = new int[B];
+        for(int i=0; i<B; ++i){
+          cpu_random_movings[i] = 0;
+        }
+        cudaMalloc(&random_movings, B * sizeof(int));
+        cudaMemcpy(random_movings, cpu_random_movings, B * sizeof(int), cudaMemcpyHostToDevice);
+      }
+
       //std::cout << "GARBAGE IS WORKING" << std::endl;
       //ComputeMap<DTYPE, CAST_DTYPE><<<block_dims, thread_dims, 0, stream>>>(
-      ComputeGaussianMap<DTYPE, CAST_DTYPE><<<block_dims, thread_dims, 0, stream>>>(
+      ComputeGaussianMapU<DTYPE, CAST_DTYPE><<<block_dims, thread_dims, 0, stream>>>(
         max_T,
         max_U,
         srcLengths,
         tgtLengths,
         H, //slope, //sigma, denom,
-        weight,        
-        workspace.GetPointerToLossRegularization()
+        weight,
+        sigma,
+        workspace.GetPointerToLossRegularization(),
+        random_movings
       );
+
+      if( loss_regularization_swing == true ){
+        //std::cout << "GARBAGE DONE" << std::endl;
+        delete [] cpu_random_movings;
+        cudaFree(random_movings);
+      }
 //#define MY_DEBUG
 #ifdef MY_DEBUG
       int mSize = options.BTU();
