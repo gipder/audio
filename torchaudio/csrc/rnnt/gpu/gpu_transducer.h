@@ -179,31 +179,6 @@ status_t Compute(
         workspace.GetPointerToLossRegularization(),
         random_movings
       );
-
-      if( loss_regularization_swing == true ){
-        //std::cout << "GARBAGE DONE" << std::endl;
-        delete [] cpu_random_movings;
-        cudaFree(random_movings);
-      }
-//#define MY_DEBUG
-#ifdef MY_DEBUG
-      int mSize = options.BTU();
-      DTYPE* garbage = new DTYPE[mSize];
-      cudaMemcpy(garbage, workspace.GetPointerToLossRegularization(), mSize * sizeof(DTYPE), cudaMemcpyDeviceToHost);
-      int* tLen = new int[B];
-      int* uLen = new int[B];
-      cudaMemcpy(tLen, srcLengths, B * sizeof(int), cudaMemcpyDeviceToHost);
-      cudaMemcpy(uLen, tgtLengths, B * sizeof(int), cudaMemcpyDeviceToHost);
-      Indexer3D idxr(max_T, max_U);
-
-      for(int b=0; b<B; b++){
-        std::cout << tLen[b] << ", " << uLen[b] << std::endl;
-      }
-
-      for(int b=0; b<B; b++){
-        std::cout << garbage[idxr(b, 0, 0)] << std::endl;
-      }
-#endif
     }
 
   }
@@ -275,8 +250,8 @@ status_t Compute(
   if (gradients != nullptr) { // compute gradients.
     // don't set gradients to zero to here as gradients might reuse memory from
     // logits
-//#define MY_DEBUG2
-#ifdef MY_DEBUG2
+#define MY_DEBUG
+#ifdef MY_DEBUG
       int mSize = options.BTU();
       DTYPE* garbage = new DTYPE[mSize];
       cudaMemcpy(garbage, workspace.GetPointerToLossRegularization(), mSize * sizeof(DTYPE), cudaMemcpyDeviceToHost);
@@ -374,32 +349,18 @@ status_t Compute(
         loss_regularization,
         loss_regularization_weight,
         workspace.GetPointerToLossRegularization());
-//#define MY_DEBUG3
-#ifdef MY_DEBUG3
-      int mSize = options.BTU();
-      DTYPE* garbage = new DTYPE[mSize];
-      cudaMemcpy(garbage, workspace.GetPointerToLossRegularization(), mSize * sizeof(DTYPE), cudaMemcpyDeviceToHost);
-      int* tLen = new int[B];
-      int* uLen = new int[B];
-      float* mCosts = new float[B];
-      cudaMemcpy(tLen, srcLengths, B * sizeof(int), cudaMemcpyDeviceToHost);
-      cudaMemcpy(uLen, tgtLengths, B * sizeof(int), cudaMemcpyDeviceToHost);
-      cudaMemcpy(mCosts, costs, B * sizeof(float), cudaMemcpyDeviceToHost);
-      Indexer3D idxr(max_T, max_U);
 
-      int bSize = options.BTU();
-      DTYPE* betas = new DTYPE[bSize];
-      cudaMemcpy(betas, workspace.GetPointerToBetas(), bSize * sizeof(DTYPE), cudaMemcpyDeviceToHost);
+    if (cudaGetLastError() != cudaSuccess) {
+      return COMPUTE_GRADIENTS_FAILED;
+    }
+  }
 
-      for(int b=0; b<B; b++){
-        int costIdx = b * max_T * max_U;
-        std::cout << tLen[b] << ", " << uLen[b] << ", "
-                  << garbage[idxr(b, 0, 0)] << ", "
-                  << mCosts[b] << ", "
-                  << betas[idxr(b, 0, 0)]
-                  << " MY_DEBUG3" << std::endl;
-      }
-#endif
+  {
+    if (loss_regularization){      
+      delete [] cpu_random_movings;
+      cudaFree(random_movings);
+    }
+  }
 #ifdef MY_DEBUG2
     if(incount == 2){
       exit(3);
@@ -409,11 +370,6 @@ status_t Compute(
       incount++;
     }
 #endif
-
-    if (cudaGetLastError() != cudaSuccess) {
-      return COMPUTE_GRADIENTS_FAILED;
-    }
-  }
 
   return SUCCESS;
 }
@@ -544,7 +500,8 @@ status_t ComputeBetas(
     dim3 block_dims(num_segments, max_U, B * H);
     dim3 thread_dims(MAX_THREADS_PER_BLOCK);
 
-    ComputeLogProbs<DTYPE, CAST_DTYPE><<<block_dims, thread_dims, 0, stream>>>(
+    ComputeLogProbs<DTYPE, CAST_DTYPE
+    ><<<block_dims, thread_dims, 0, stream>>>(
         /*max_src_len=*/max_T,
         /*max_tgt_len=*/max_U,
         /*num_targets=*/D,
