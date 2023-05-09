@@ -99,6 +99,55 @@ __global__ void ComputeGaussianMapU(
   }
 }
 
+/*
+
+template <typename DTYPE, typename CAST_DTYPE>
+__global__ void ComputeLossRegMap(
+    int maxSrcLen,
+    int maxTgtLen,
+    const int* srcLengths,
+    const int* tgtLengths,
+    int H,
+    const DTYPE weight,
+    const DTYPE ratio,
+    const DTYPE lower,
+    const DTYPE upper,
+    CAST_DTYPE* outputs,
+    const int* randMovings) {
+  const int& maxT = maxSrcLen;
+  const int& maxU = maxTgtLen;
+  
+  const int bTgt = blockIdx.z; // 0 <= b < B
+  const int bSrc = bTgt / H;
+  const int T = srcLengths[bSrc];
+  const int U = tgtLengths[bTgt] + 1;
+  DTYPE slope = (DTYPE)U / (DTYPE)T;
+  //DTYPE sigma = (DTYPE)sigma;
+  DTYPE denom = 1.0 / std::sqrt(2 * M_PI * sigma * sigma);
+
+  const int t = blockIdx.x * blockDim.x + threadIdx.x;
+  const int u = blockIdx.y;
+
+  if (t >= T || u >= U) { // out of boundary.
+    return;
+  }
+
+  Indexer3D indexer(maxT, maxU);
+  
+  int idx = indexer(bTgt, t, u);
+  
+  //for blank
+  //TODO: check if it is thread safe
+  outputs[idx] = std::log(1 + weight * 
+                    std::exp( -(u - slope * t - randMovings[bTgt])
+                    * (u - slope * t  - randMovings[bTgt])
+                    / (2 * sigma * sigma)) * denom);
+  if( outputs[idx] == -INFINITY ){
+      outputs[idx] = 0; //std::log(1)
+  }
+}
+*/
+
 template <typename DTYPE, typename CAST_DTYPE>
 __global__ void ComputeLogProbs(
     int maxSrcLen,

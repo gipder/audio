@@ -134,7 +134,7 @@ std::tuple<torch::Tensor, c10::optional<torch::Tensor>> compute(
           /*costs=*/costs.data_ptr<float>(),
           /*gradients=*/gradients->data_ptr<float>());
       break;
-    }
+    }        
     case torch::ScalarType::Half: {
       Compute</*DTYPE=*/c10::Half, /*CAST_DTYPE=*/float>(
           /*workspace=*/workspace,
@@ -145,7 +145,7 @@ std::tuple<torch::Tensor, c10::optional<torch::Tensor>> compute(
           /*costs=*/costs.data_ptr<c10::Half>(),
           /*gradients=*/gradients->data_ptr<c10::Half>());
       break;
-    }
+    }    
     default: {
       break;
     }

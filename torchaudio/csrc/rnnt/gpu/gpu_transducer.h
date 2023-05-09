@@ -8,6 +8,9 @@
 #include <cmath>
 #include <random>
 
+#include <mutex>
+//#define MY_VERBOSE
+
 namespace torchaudio {
 namespace rnnt {
 namespace gpu {
@@ -76,6 +79,181 @@ status_t LogSumExp2D(
   return SUCCESS;
 }
 
+#define MAX_LOSS_MASK_NUM (256)
+template <typename DTYPE, typename CAST_DTYPE>
+status_t DrawLossRegMap_CPU(
+    int B,
+    int maxSrcLen,
+    int maxTgtLen,
+    const int* srcLengths,
+    const int* tgtLengths,
+    const DTYPE weight,
+    const DTYPE ratio,
+    const DTYPE lower,
+    const DTYPE upper,
+    CAST_DTYPE* outputs) {
+  { // compute max among D.
+    std::mutex my_mtx;
+    std::lock_guard<std::mutex> lock(my_mtx); 
+    const int& maxT = maxSrcLen;
+    const int& maxU = maxTgtLen;
+    Indexer3D indexer(maxT, maxU);
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+
+    DTYPE* cpu_outputs = nullptr;
+    //std::cout << "GARBAGE111123123122" << std::endl;
+    cpu_outputs = new DTYPE[B * maxT * maxU];
+#ifdef MY_VERBOSE
+    std::cout << "cpu_outputs: " << cpu_outputs << std::endl;
+    std::cout << "Batch Size: " << B << std::endl;
+    std::cout << "maxT: " << maxT << std::endl;
+    std::cout << "maxU: " << maxU << std::endl;
+    int cpu_outputs_size = B * maxT * maxU;
+    std::cout << "cpu_outputs Size: " << B * maxT * maxU << std::endl;
+#endif
+    if(cpu_outputs == nullptr){
+      return FAILURE;
+    }
+
+    int* cpu_srcLengths = new int[B];
+    int* cpu_tgtLengths = new int[B];
+    cudaMemcpy(cpu_srcLengths, srcLengths, sizeof(int)*B, cudaMemcpyDeviceToHost);
+    cudaMemcpy(cpu_tgtLengths, tgtLengths, sizeof(int)*B, cudaMemcpyDeviceToHost);
+
+    //std::cout << "GARBAGE1112" << std::endl;
+    for(int b=0; b<B; b++){
+      const int T = cpu_srcLengths[b];
+      const int U = cpu_tgtLengths[b] + 1;
+#ifdef MY_VERBOSE
+      std::cout << "T: " << T << std::endl;
+      std::cout << "U: " << U << std::endl;
+#endif
+      //make random range
+      //for time
+      int tm[MAX_LOSS_MASK_NUM][2];
+      int tm_len = 0;
+      int tm_count = ratio * T;
+      if( tm_count == 0 ){ tm_count = 1; }
+      int count = 0;
+      int value = 0;
+      for(int i=0; i<MAX_LOSS_MASK_NUM; i++){
+        std::uniform_int_distribution<> dis_start(value, T);
+        value = dis_start(gen);
+        if( value >= T ){
+          break;
+        }
+        std::uniform_int_distribution<> dis_len(1, tm_count);
+        int width = dis_len(gen);
+        if( tm_count < count + width ){
+          width = tm_count - count;
+        }
+        if( T < value + width ){
+          width = T - value;
+        }
+        
+        tm[i][0] = value;
+        tm[i][1] = width;
+
+        count += width;
+        value += width;
+        tm_len++;
+
+        if( tm_count <= count ){
+          break;
+        }
+        if( tm_len >= MAX_LOSS_MASK_NUM ){
+          break;
+        }
+      }
+
+      //for label
+      int lm[MAX_LOSS_MASK_NUM][2];
+      int lm_len = 0;
+      int lm_count = ratio * U;
+      if( lm_count == 0){ lm_count = 1; }
+      count = 0;
+      value = 0;
+      for(int i=0; i<MAX_LOSS_MASK_NUM; i++){
+        std::uniform_int_distribution<> dis_start(value, U);
+        value = dis_start(gen);
+        if( value >= U ){
+          break;
+        }
+        std::uniform_int_distribution<> dis_len(1, lm_count);
+        int width = dis_len(gen);
+        if( lm_count < count + width ){
+          width = lm_count - count;
+        }
+        if( U < value + width ){
+          width = U - value;
+        }
+
+        lm[i][0] = value;
+        lm[i][1] = width;
+
+        count += width;
+        value += width;
+        lm_len++;
+
+        if( lm_count <= count ){
+          break;
+        }
+
+        if( lm_len >= MAX_LOSS_MASK_NUM ){
+          break;
+        }
+      }
+#ifdef MY_VERBOSE
+      std::cout << "b: " << b << std::endl;
+      std::cout << "tm_len: " << tm_len << std::endl;
+      for(int i=0; i<tm_len; i++){
+        std::cout << "tm " << i << ": " << tm[i][0] << ", " << tm[i][1] << std::endl;
+      }
+      std::cout << "lm_len: " << lm_len << std::endl;
+      for(int i=0; i<lm_len; i++){
+        std::cout << "lm " << i << ": " << lm[i][0] << ", " << lm[i][1] << std::endl;
+      }
+#endif
+
+      std::uniform_real_distribution<> dis_real(lower, upper);
+      for(int t=0; t<T; t++){
+        for(int u=0; u<U; u++){
+          int idx = indexer(b, t, u);
+#ifdef MY_VERBOSE
+          if( cpu_outputs_size <= idx){
+            std::cout << "idx: " << idx << std::endl;
+          }
+#endif
+          cpu_outputs[idx] = (DTYPE)0;
+
+          //for time
+          for(int k=0; k<tm_len; k++){
+            if(t>=tm[k][0] && t<(tm[k][0] + tm[k][1])){
+              cpu_outputs[idx] = std::log( 1 + weight * (DTYPE)dis_real(gen));
+            }
+          }
+
+          //for label
+          for(int k=0; k<lm_len; k++){
+            if(u>=lm[k][0] && u<(lm[k][0] + lm[k][1])){
+              cpu_outputs[idx] = std::log( 1 + weight * (DTYPE)dis_real(gen));
+            }
+          }
+        }
+      }
+    }
+    
+    cudaMemcpy(outputs, cpu_outputs, sizeof(DTYPE)*B*maxT*maxU, cudaMemcpyHostToDevice);
+    if( cpu_outputs != nullptr ){ delete cpu_outputs; }
+    if( cpu_srcLengths != nullptr ){ delete cpu_srcLengths; }
+    if( cpu_tgtLengths != nullptr ){ delete cpu_tgtLengths; }
+  }
+
+  return SUCCESS;
+}
+
 // CPU version computMap
 
 // Inputs:
@@ -126,9 +304,35 @@ status_t Compute(
       return status;
     }
   }
+  {
+    //bool loss_regularizationt = true;
+    if( loss_regularization ){
+#ifdef MY_VERBOSE
+      std::cout << "GARBAGE DrawLossRegMap_CPU starts" << std::endl;
+#endif
+      status_t status = DrawLossRegMap_CPU<DTYPE, CAST_DTYPE>(
+                                          B,
+                                          max_T,
+                                          max_U,
+                                          srcLengths,
+                                          tgtLengths,
+                                          /*weight*/options.lossRegularizationWeight_,
+                                          /*ratio*/0.07,
+                                          /*lower*/-1,
+                                          /*upper*/0,
+                                          workspace.GetPointerToLossRegularization());
+#ifdef MY_VERBOSE
+      std::cout << "GARBAGE DrawLossRegMap_CPU ends" << std::endl;
+#endif
+      if (status != SUCCESS){
+        return status;
+      }
+    }
+  }
 
   {
-    if (loss_regularization){
+    //if (loss_regularization){
+    if ( false ){
       int num_segments =
           (max_T + MAX_THREADS_PER_BLOCK - 1) / MAX_THREADS_PER_BLOCK;
       dim3 block_dims(num_segments, max_U, B * H);
@@ -219,7 +423,9 @@ status_t Compute(
     // each thread is identified by a 2 d tuple
     // 2nd dim is 2. 1 for alpha, 1 for beta
     dim3 thread_dims(WARP_SIZE, 2);
-
+#ifdef MY_VERBOSE
+      std::cout << "GARBAGE ComputeAlpahsBetasCosts starts" << std::endl;
+#endif
     ComputeAlphasBetasCosts<DTYPE, CAST_DTYPE>
         <<<block_dims, thread_dims, 0, stream>>>(
             /*max_src_len=*/max_T,
@@ -242,6 +448,9 @@ status_t Compute(
             loss_regularization,
             loss_regularization_weight,
             workspace.GetPointerToLossRegularization());
+#ifdef MY_VERBOSE
+      std::cout << "GARBAGE ComputeAlpahsBetasCosts ends" << std::endl;
+#endif
     if (cudaGetLastError() != cudaSuccess) {
       return COMPUTE_ALPHAS_BETAS_COSTS_FAILED;
     }
@@ -250,7 +459,7 @@ status_t Compute(
   if (gradients != nullptr) { // compute gradients.
     // don't set gradients to zero to here as gradients might reuse memory from
     // logits
-#define MY_DEBUG
+//#define MY_DEBUG
 #ifdef MY_DEBUG
       int mSize = options.BTU();
       DTYPE* garbage = new DTYPE[mSize];
@@ -328,7 +537,9 @@ status_t Compute(
         (max_T + MAX_THREADS_PER_BLOCK - 1) / MAX_THREADS_PER_BLOCK;
     dim3 block_dims(num_blocks, max_U, B * H);
     dim3 thread_dims(MAX_THREADS_PER_BLOCK);
-
+#ifdef MY_VERBOSE
+      std::cout << "GARBAGE ComputeGradients starts" << std::endl;
+#endif
     ComputeGradients<DTYPE, CAST_DTYPE><<<block_dims, thread_dims, 0, stream>>>(
         /*max_src_len=*/max_T,
         /*max_tgt_len=*/max_U,
@@ -346,22 +557,25 @@ status_t Compute(
         H,
         fast_emit,
         fast_emit_weight,
-        loss_regularization,
+        false,//loss_regularization,
         loss_regularization_weight,
         workspace.GetPointerToLossRegularization());
-
+#ifdef MY_VERBOSE
+      std::cout << "GARBAGE ComputeGradients ends" << std::endl;
+#endif
     if (cudaGetLastError() != cudaSuccess) {
       return COMPUTE_GRADIENTS_FAILED;
     }
   }
-
+/*
   {
-    if (loss_regularization){      
-      delete [] cpu_random_movings;
-      cudaFree(random_movings);
+    if (loss_regularization){
+      //delete [] cpu_random_movings;
+      //cudaFree(random_movings);
     }
   }
-#ifdef MY_DEBUG2
+*/
+#ifdef MY_DEBUG
     if(incount == 2){
       exit(3);
     }
